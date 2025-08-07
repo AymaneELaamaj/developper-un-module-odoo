@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!-- Pas de template inherit - on utilise SEULEMENT les assets du manifeste -->
+</odoo>
