@@ -1,62 +1,311 @@
-/* Styles pour le bouton Spring Boot Validate */
+/* ===== POS SPRING CONNECTOR - STYLES PERSONNALISÉS ===== */
+
+/* ✅ 1. DÉSACTIVATION COMPLÈTE DES TAXES */
+.pos .tax-line,
+.pos .tax-details,
+.pos .tax-info,
+.pos [class*="tax"]:not(.spring-validate-btn):not(.subsidy-details),
+.pos .o_tax_line,
+.pos-receipt .tax-line,
+.payment-screen .tax-section {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+/* ✅ 2. BOUTON SPRING BOOT STYLISÉ */
 .spring-validate-btn {
-    background: linear-gradient(135deg, #28a745, #20c997) !important;
-    border: 2px solid #1e7e34 !important;
-    color: white !important;
-    transition: all 0.3s ease;
-    font-weight: bold;
+    background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%) !important;
+    border: 2px solid #28a745 !important;
+    border-radius: 8px !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    text-align: center !important;
+    padding: 10px 8px !important;
+    margin: 4px !important;
+    min-width: 85px !important;
+    min-height: 65px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    box-shadow: 0 2px 4px rgba(40, 167, 69, 0.2) !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+
+.spring-validate-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    transition: left 0.5s;
 }
 
 .spring-validate-btn:hover {
-    background: linear-gradient(135deg, #1e7e34, #17a2b8) !important;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 12px rgba(40, 167, 69, 0.3);
+    background: linear-gradient(135deg, #c8e6c9 0%, #a5d6a7 100%) !important;
+    box-shadow: 0 6px 12px rgba(40, 167, 69, 0.3) !important;
+    transform: translateY(-3px) !important;
+    border-color: #218838 !important;
+}
+
+.spring-validate-btn:hover::before {
+    left: 100%;
 }
 
 .spring-validate-btn:active {
-    transform: translateY(0);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transform: translateY(-1px) !important;
+    box-shadow: 0 3px 6px rgba(40, 167, 69, 0.3) !important;
 }
 
 .spring-validate-btn i {
-    font-size: 18px;
-    margin-bottom: 4px;
-    display: block;
+    font-size: 20px !important;
+    color: #28a745 !important;
+    margin-bottom: 4px !important;
+    transition: all 0.3s ease !important;
+}
+
+.spring-validate-btn:hover i {
+    color: #218838 !important;
+    transform: scale(1.1) !important;
 }
 
 .spring-validate-btn span {
-    display: block;
-    font-size: 10px;
-    font-weight: bold;
-    text-transform: uppercase;
+    font-size: 10px !important;
+    font-weight: bold !important;
+    color: #28a745 !important;
+    line-height: 1.2 !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1) !important;
 }
 
-/* Notifications Spring Boot */
-.o_notification.spring-success {
-    background: linear-gradient(135deg, #d4edda, #c3e6cb);
-    border-left: 4px solid #28a745;
-    color: #155724;
+.spring-validate-btn:hover span {
+    color: #218838 !important;
 }
 
-.o_notification.spring-error {
-    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
-    border-left: 4px solid #dc3545;
-    color: #721c24;
+/* ✅ 3. DÉTAILS DE SUBVENTION DANS LES LIGNES */
+.subsidy-details {
+    background: linear-gradient(90deg, rgba(40, 167, 69, 0.1), rgba(40, 167, 69, 0.05)) !important;
+    border-left: 3px solid #28a745 !important;
+    padding: 6px 10px !important;
+    margin: 4px 0 !important;
+    border-radius: 0 6px 6px 0 !important;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+    transition: all 0.2s ease !important;
 }
 
-/* Loading indicator */
-.spring-loading {
-    display: inline-block;
-    width: 16px;
-    height: 16px;
-    border: 2px solid #f3f3f3;
-    border-top: 2px solid #28a745;
+.subsidy-details:hover {
+    background: linear-gradient(90deg, rgba(40, 167, 69, 0.15), rgba(40, 167, 69, 0.08)) !important;
+    border-left-width: 4px !important;
+}
+
+.subsidy-line {
+    color: #28a745 !important;
+    font-weight: 600 !important;
+    font-size: 11px !important;
+    margin-bottom: 2px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.subsidy-line::before {
+    content: "🏢 ";
+    margin-right: 4px;
+}
+
+.employee-portion {
+    color: #007bff !important;
+    font-weight: 700 !important;
+    font-size: 11px !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.employee-portion::before {
+    content: "👤 ";
+    margin-right: 4px;
+}
+
+/* ✅ 4. NOTIFICATIONS PERSONNALISÉES */
+.o_notification[data-spring="true"] {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%) !important;
+    border: none !important;
+    border-left: 4px solid #28a745 !important;
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.15) !important;
+    border-radius: 6px !important;
+}
+
+.o_notification[data-spring="true"] .o_notification_title {
+    color: #155724 !important;
+    font-weight: 600 !important;
+}
+
+.o_notification[data-spring="true"] .o_notification_content {
+    color: #155724 !important;
+}
+
+/* ✅ 5. POP-UP DE SUCCÈS PERSONNALISÉE */
+.modal-dialog[data-spring-success="true"] .modal-content {
+    border: 2px solid #28a745 !important;
+    box-shadow: 0 10px 25px rgba(40, 167, 69, 0.2) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+}
+
+.modal-dialog[data-spring-success="true"] .modal-header {
+    background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%) !important;
+    border-bottom: 1px solid #28a745 !important;
+    padding: 20px !important;
+}
+
+.modal-dialog[data-spring-success="true"] .modal-title {
+    color: #155724 !important;
+    font-weight: 700 !important;
+    font-size: 18px !important;
+}
+
+.modal-dialog[data-spring-success="true"] .modal-body {
+    padding: 25px !important;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif !important;
+}
+
+/* ✅ 6. AJUSTEMENTS DU TOTAL SANS TAXES */
+.pos .order-container .order .summary .line.total {
+    border-top: 2px solid #28a745 !important;
+    background: linear-gradient(90deg, #f8f9fa, #e9ecef) !important;
+    font-weight: 700 !important;
+    font-size: 16px !important;
+    color: #155724 !important;
+}
+
+.pos .order-container .order .summary .line.total::after {
+    content: " (Sans taxes)";
+    font-size: 11px;
+    color: #6c757d;
+    font-weight: normal;
+}
+
+/* ✅ 7. ÉCRAN DE PAIEMENT SANS TAXES */
+.payment-screen .payment-due {
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%) !important;
+    border: 2px solid #2196f3 !important;
+    border-radius: 8px !important;
+    padding: 15px !important;
+    margin: 10px 0 !important;
+}
+
+.payment-screen .payment-due .value {
+    color: #1565c0 !important;
+    font-weight: 700 !important;
+    font-size: 22px !important;
+}
+
+.payment-note {
+    background: rgba(40, 167, 69, 0.1) !important;
+    padding: 8px 12px !important;
+    border-radius: 4px !important;
+    border-left: 3px solid #28a745 !important;
+    margin-top: 10px !important;
+    font-size: 12px !important;
+    color: #155724 !important;
+    font-style: italic !important;
+}
+
+/* ✅ 8. ANIMATIONS DE CHARGEMENT POUR LES APPELS API */
+.spring-validate-btn.loading {
+    pointer-events: none !important;
+    opacity: 0.7 !important;
+    animation: pulse 1.5s infinite !important;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.02); opacity: 0.9; }
+    100% { transform: scale(1); opacity: 0.7; }
+}
+
+.spring-validate-btn.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin: -10px 0 0 -10px;
+    border: 2px solid #28a745;
+    border-top: 2px solid transparent;
     border-radius: 50%;
-    animation: spring-spin 1s linear infinite;
-    margin-right: 8px;
+    animation: spin 1s linear infinite;
 }
 
-@keyframes spring-spin {
+@keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* ✅ 9. RESPONSIVE DESIGN */
+@media (max-width: 768px) {
+    .spring-validate-btn {
+        min-width: 70px !important;
+        min-height: 55px !important;
+        padding: 8px 6px !important;
+    }
+    
+    .spring-validate-btn i {
+        font-size: 16px !important;
+    }
+    
+    .spring-validate-btn span {
+        font-size: 9px !important;
+    }
+    
+    .subsidy-details {
+        padding: 4px 6px !important;
+        margin: 2px 0 !important;
+    }
+    
+    .subsidy-line,
+    .employee-portion {
+        font-size: 10px !important;
+    }
+}
+
+/* ✅ 10. MODES SOMBRE/CLAIR */
+@media (prefers-color-scheme: dark) {
+    .spring-validate-btn {
+        background: linear-gradient(135deg, #2d5a2d 0%, #1e3a1e 100%) !important;
+        border-color: #4caf50 !important;
+        color: #e8f5e8 !important;
+    }
+    
+    .spring-validate-btn:hover {
+        background: linear-gradient(135deg, #3e6b3e 0%, #2d5a2d 100%) !important;
+    }
+    
+    .subsidy-details {
+        background: linear-gradient(90deg, rgba(76, 175, 80, 0.2), rgba(76, 175, 80, 0.1)) !important;
+        border-left-color: #4caf50 !important;
+    }
+}
+
+/* ✅ 11. FOCUS ET ACCESSIBILITÉ */
+.spring-validate-btn:focus {
+    outline: 3px solid rgba(40, 167, 69, 0.5) !important;
+    outline-offset: 2px !important;
+}
+
+/* ✅ 12. PRINT STYLES (pour les reçus) */
+@media print {
+    .spring-validate-btn,
+    .subsidy-details {
+        display: none !important;
+    }
+    
+    .pos .order .summary .line.total::after {
+        content: " - Subventions appliquées" !important;
+    }
 }

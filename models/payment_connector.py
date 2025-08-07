@@ -2,7 +2,7 @@ import json
 import logging
 import requests
 from odoo import api, fields, models, _
-from odoo.exceptions import ValidationError, UserError
+from odoo.exceptions import ValidationError
 
 _logger = logging.getLogger(__name__)
 
@@ -12,30 +12,24 @@ class PaymentConnector(models.Model):
     _description = 'Payment Connector for Spring Boot API'
 
     name = fields.Char(string='Name', required=True)
-    api_url = fields.Char(string='API URL', required=True, 
-                         default='http://localhost:8080/api/payments')
+    api_url = fields.Char(string='API URL', required=True, default='http://localhost:8080/api/payments')
     api_version = fields.Selection([
         ('v2', 'Version v2 (/v2/validate)')
     ], string='API Version', default='v2', required=True)
     timeout = fields.Integer(string='Timeout (seconds)', default=30)
     is_active = fields.Boolean(string='Active', default=True)
-    
+
     def _get_endpoint_url(self):
-        """Construire l'URL complète pour l'API v2"""
         self.ensure_one()
         return f"{self.api_url.rstrip('/')}/v2/validate"
 
     def _prepare_payment_data(self, order_data):
-        """Préparer les données au format attendu par Spring Boot"""
         try:
-            # Validation des données d'entrée
             if not order_data.get('order_id'):
                 raise ValidationError(_("Order ID is required"))
-            
             if not order_data.get('lines'):
                 raise ValidationError(_("Order lines are required"))
 
-            # Construction des données avec orderId au lieu de order_id
             payment_data = {
                 'orderId': str(order_data['order_id']),
                 'customer': {
@@ -44,18 +38,15 @@ class PaymentConnector(models.Model):
                 'items': []
             }
 
-            # Traitement des lignes de commande (format v2 uniquement)
             for line in order_data.get('lines', []):
                 if not line.get('product_id'):
                     _logger.warning(f"Ligne sans product_id ignorée: {line}")
                     continue
-                
-                # Format v2: productId (camelCase)
+
                 item = {
                     'productId': int(line['product_id']),
                     'quantity': float(line.get('qty', 1))
                 }
-                
                 payment_data['items'].append(item)
 
             if not payment_data['items']:
@@ -64,19 +55,116 @@ class PaymentConnector(models.Model):
             return payment_data
 
         except Exception as e:
-            _logger.error(f"Erreur lors de la préparation des données: {e}")
-            raise ValidationError(_("Failed to prepare payment data: %s") % str(e))
+            _logger.error(f"Erreur lors du traitement des données de paiement: {e}", exc_info=True)
+            return {
+                'success': False,
+                'error': _("Failed to prepare payment data: %s") % str(e),
+                'error_type': 'processing_error'
+            }
 
+    def _extract_subsidy_data(self, response_data):
+        """✅ VERSION ULTRA-SIMPLIFIÉE pour debug"""
+        try:
+            # ✅ LOG complet des données reçues
+            _logger.info(f"🔍 PYTHON DEBUG - Response data COMPLÈTE: {json.dumps(response_data, indent=2)}")
+            
+            # Valeurs par défaut
+            extracted_data = {
+                'valide': response_data.get('status') == 'success',
+                'message': response_data.get('message', ''),
+                'montantTotal': 0.0,
+                'partSalariale': 0.0,
+                'partPatronale': 0.0,
+                'soldeActuel': 0.0,
+                'nouveauSolde': 0.0,
+                'articles': []
+            }
+
+            # ✅ EXTRACTION DIRECTE des champs de votre API
+            
+            # amountCharged = ce que le client a payé = partSalariale
+            if 'amountCharged' in response_data:
+                extracted_data['partSalariale'] = float(response_data['amountCharged'])
+            
+            # remainingBalance = nouveau solde
+            if 'remainingBalance' in response_data:
+                extracted_data['nouveauSolde'] = float(response_data['remainingBalance'])
+
+            # ✅ CALCULER à partir des articles
+            articles = response_data.get('articles', [])
+            if articles and len(articles) > 0:
+                total_prix = 0.0
+                total_subvention = 0.0
+                
+                for article in articles:
+                    prix_article = float(article.get('montantTotal', 0))
+                    subvention_article = float(article.get('subventionTotale', 0))
+                    
+                    total_prix += prix_article
+                    total_subvention += subvention_article
+                
+                # ✅ ASSIGNER les totaux calculés
+                extracted_data['montantTotal'] = total_prix
+                extracted_data['partPatronale'] = total_subvention
+                
+                # ✅ Si partSalariale pas encore définie, la calculer
+                if extracted_data['partSalariale'] == 0.0:
+                    extracted_data['partSalariale'] = total_prix - total_subvention
+                
+                # ✅ Calculer solde actuel
+                if extracted_data['soldeActuel'] == 0.0:
+                    extracted_data['soldeActuel'] = extracted_data['nouveauSolde'] + extracted_data['partSalariale']
+
+            # ✅ LOG des données extraites
+            _logger.info(f"🎯 PYTHON DEBUG - Données extraites: {extracted_data}")
+            
+            return extracted_data
+
+        except Exception as e:
+            _logger.error(f"❌ Erreur extraction: {e}")
+            # En cas d'erreur, retourner au moins les données de base
+            return {
+                'valide': response_data.get('status') == 'success',
+                'message': response_data.get('message', ''),
+                'montantTotal': 0.0,
+                'partSalariale': 0.0,
+                'partPatronale': 0.0,
+                'soldeActuel': 0.0,
+                'nouveauSolde': 0.0,
+                'articles': []
+            }
+
+    def _convert_to_float(self, value):
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.replace(',', '.'))
+            except ValueError:
+                return 0.0
+        if isinstance(value, dict) and 'doubleValue' in value:
+            return float(value['doubleValue'])
+        return 0.0
     def validate_payment(self, order_data):
         """Valider le paiement via l'API Spring Boot"""
         self.ensure_one()
         
         if not self.is_active:
-            raise UserError(_("Payment connector is not active"))
+            return {
+                'success': False,
+                'error': _("Payment connector is not active"),
+                'error_type': 'connector_inactive'
+            }
 
         try:
             # Préparer les données
             payment_data = self._prepare_payment_data(order_data)
+            
+            # Si _prepare_payment_data retourne une erreur, la propager
+            if isinstance(payment_data, dict) and not payment_data.get('success', True):
+                return payment_data
             
             # URL de l'endpoint
             endpoint_url = self._get_endpoint_url()
@@ -143,14 +231,15 @@ class PaymentConnector(models.Model):
             }
 
     def _process_api_response(self, response):
-        """Traiter la réponse de l'API Spring Boot"""
+        """Traiter la réponse de l'API Spring Boot avec détails subvention"""
         try:
             # Statut HTTP 200-299 = succès
             if response.status_code >= 200 and response.status_code < 300:
                 try:
                     response_data = response.json()
+                    
                     # Vérifier le statut dans la réponse (v2 retourne toujours 200 même pour les erreurs)
-                    if response_data.get('status') == 'error':
+                    if response_data.get('status') == 'error' or not response_data.get('valide', True):
                         return {
                             'success': False,
                             'error': response_data.get('message', _('Payment validation failed')),
@@ -158,12 +247,16 @@ class PaymentConnector(models.Model):
                             'spring_response': response_data
                         }
                     else:
+                        # ✅ Extraire les données de subvention pour JavaScript
+                        spring_data = self._extract_subsidy_data(response_data)
+                        
                         return {
                             'success': True,
-                            'data': response_data,
+                            'data': spring_data,  # ✅ Données formatées pour JS
                             'message': response_data.get('message', _('Payment validated successfully')),
-                            'spring_response': response_data
+                            'spring_response': spring_data  # ✅ Données complètes de Spring
                         }
+                        
                 except json.JSONDecodeError:
                     # Succès mais pas de JSON valide
                     return {
@@ -213,41 +306,37 @@ class PaymentConnector(models.Model):
 
     @api.model
     def test_connection(self, connector_id):
-        """Tester la connexion à l'API (méthode appelée depuis le JS)"""
         try:
             connector = self.browse(connector_id)
             if not connector.exists():
-                return {
-                    'success': False,
-                    'error': _('Connector not found')
-                }
+                return {'success': False, 'error': _('Connector not found')}
 
-            # Test avec des données factices adaptées au format Spring Boot
             test_data = {
                 'order_id': 'TEST_CONNECTION',
                 'customer_email': 'test@odoo.com',
-                'lines': [{
-                    'product_id': 1,
-                    'qty': 1
-                }]
+                'lines': [{'product_id': 1, 'qty': 1}]
             }
 
             result = connector.validate_payment(test_data)
-            
-            # Même si l'API rejette les données de test, la connexion fonctionne
+
             if result.get('error_type') in ['timeout', 'connection']:
                 return result
-            else:
-                # Connexion OK, même si validation échoue (normal avec données de test)
-                return {
-                    'success': True,
-                    'message': _('Connection successful'),
-                    'test_result': result
-                }
+
+            return {
+                'success': True,
+                'message': _('Connection successful'),
+                'test_result': result
+            }
 
         except Exception as e:
             _logger.error(f"Erreur test de connexion: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {'success': False, 'error': str(e)}
+
+    @api.model
+    def get_pos_config_data(self):
+        return {
+            'disable_taxes': True,
+            'show_tax_details': False,
+            'calculate_tax_on_subsidy': False,
+            'spring_validation_required': True
+        }
