@@ -1,0 +1,62 @@
+/* Styles pour le bouton Spring Boot Validate */
+.spring-validate-btn {
+    background: linear-gradient(135deg, #28a745, #20c997) !important;
+    border: 2px solid #1e7e34 !important;
+    color: white !important;
+    transition: all 0.3s ease;
+    font-weight: bold;
+}
+
+.spring-validate-btn:hover {
+    background: linear-gradient(135deg, #1e7e34, #17a2b8) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 12px rgba(40, 167, 69, 0.3);
+}
+
+.spring-validate-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.spring-validate-btn i {
+    font-size: 18px;
+    margin-bottom: 4px;
+    display: block;
+}
+
+.spring-validate-btn span {
+    display: block;
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+/* Notifications Spring Boot */
+.o_notification.spring-success {
+    background: linear-gradient(135deg, #d4edda, #c3e6cb);
+    border-left: 4px solid #28a745;
+    color: #155724;
+}
+
+.o_notification.spring-error {
+    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
+    border-left: 4px solid #dc3545;
+    color: #721c24;
+}
+
+/* Loading indicator */
+.spring-loading {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid #f3f3f3;
+    border-top: 2px solid #28a745;
+    border-radius: 50%;
+    animation: spring-spin 1s linear infinite;
+    margin-right: 8px;
+}
+
+@keyframes spring-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
