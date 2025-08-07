@@ -35,7 +35,6 @@ class SpringBootApiService {
             };
 
             // Traiter les lignes de commande (articles dans le panier)
-            // CORRECTION: Vérifier différentes propriétés possibles
             const lines = order.orderlines || order.lines || order.get_orderlines() || [];
             
             console.log('Order object:', order);
@@ -51,7 +50,6 @@ class SpringBootApiService {
                 console.log('Line product:', line.product);
                 console.log('Line qty/quantity:', line.qty, line.quantity);
                 
-                // CORRECTION: Tester différentes propriétés
                 const product = line.product || line.product_id;
                 const quantity = line.quantity || line.qty || 1;
                 
@@ -127,20 +125,170 @@ class SpringBootApiService {
     }
 
     /**
+     * ✅ NOUVEAU : Afficher la pop-up de succès avec détails de subvention
+     */
+    /**
+     * ✅ CORRIGÉ : Afficher la pop-up de succès avec debug et version simple
+     */
+    /**
+     * ✅ CORRIGÉ : Afficher la pop-up de succès avec debug et version simple
+     */
+    showSuccessPopup(springResponse) {
+        // ✅ DEBUG : Vérifier les données reçues
+        console.log('🔍 DEBUG - Données Spring Boot reçues:', springResponse);
+        
+        // Récupérer les données de la réponse Spring Boot
+        const data = springResponse.spring_response || springResponse.data || springResponse;
+        
+        console.log('🔍 DEBUG - Data extraite:', data);
+        
+        // Extraire les informations
+        const numeroTicket = this.generateTicketNumber();
+        const date = new Date().toLocaleDateString('fr-FR');
+        const heureTransaction = new Date().toLocaleTimeString('fr-FR');
+        const montantTotal = data.montantTotal || 0;
+        const partSalariale = data.partSalariale || 0;
+        const partPatronale = data.partPatronale || 0;
+
+        console.log('🔍 DEBUG - Montants extraits:', { montantTotal, partSalariale, partPatronale });
+
+        // ✅ VERSION SIMPLE : Message texte au lieu de HTML complexe
+        const message = `🎉 TRANSACTION RÉUSSIE
+
+📋 Détails:
+• N° Ticket: ${numeroTicket}
+• Date: ${date}
+• Heure: ${heureTransaction}
+
+💰 Détail Financier:
+• Prix total: ${montantTotal.toFixed(2)}€
+• Subvention entreprise: ${partPatronale.toFixed(2)}€
+• Votre part: ${partSalariale.toFixed(2)}€
+
+✅ Montant déduit de votre badge avec succès
+${partPatronale > 0 ? `🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ !` : ''}`;
+
+        // Afficher la pop-up avec message simple
+        this.dialog.add(AlertDialog, {
+            title: _t('✅ Paiement Validé avec Succès'),
+            body: message,
+            confirmLabel: _t('OK'),
+            confirm: () => {
+                console.log('Pop-up de succès fermée');
+            }
+        });
+
+        // Notification de succès supplémentaire
+        this.notification.add(
+            _t('Paiement validé - Subvention entreprise: ') + partPatronale.toFixed(2) + '€',
+            {
+                type: 'success',
+                sticky: false
+            }
+        );
+    }
+
+    /**
+     * ✅ NOUVEAU : Construire le contenu HTML de la pop-up de succès
+     */
+    buildSuccessPopupContent({ numeroTicket, date, heureTransaction, montantTotal, partSalariale, partPatronale }) {
+        return `
+            <div style="font-family: Arial, sans-serif; padding: 15px;">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <h3 style="color: #28a745; margin: 0;">🎉 TRANSACTION RÉUSSIE</h3>
+                </div>
+                
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <strong>N° Ticket:</strong>
+                        <span style="font-family: monospace;">${numeroTicket}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <strong>Date:</strong>
+                        <span>${date}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <strong>Heure:</strong>
+                        <span>${heureTransaction}</span>
+                    </div>
+                </div>
+
+                <div style="background: #e8f4fd; padding: 15px; border-radius: 8px; border-left: 4px solid #007bff;">
+                    <h4 style="margin: 0 0 12px 0; color: #007bff;">💰 Détail Financier</h4>
+                    
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span>Prix total articles:</span>
+                        <strong style="color: #333;">${montantTotal.toFixed(2)}€</strong>
+                    </div>
+                    
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="color: #28a745;">🏢 Subvention entreprise:</span>
+                        <strong style="color: #28a745;">-${partPatronale.toFixed(2)}€</strong>
+                    </div>
+                    
+                    <hr style="margin: 12px 0; border: none; border-top: 1px solid #ccc;">
+                    
+                    <div style="display: flex; justify-content: space-between; font-size: 16px;">
+                        <span><strong>👤 Votre part payée:</strong></span>
+                        <strong style="color: #dc3545; font-size: 18px;">${partSalariale.toFixed(2)}€</strong>
+                    </div>
+                </div>
+
+                <div style="background: #d4edda; padding: 12px; border-radius: 6px; margin-top: 15px; text-align: center;">
+                    <span style="color: #155724; font-weight: bold;">
+                        ✅ Montant déduit de votre badge avec succès
+                    </span>
+                </div>
+
+                ${partPatronale > 0 ? `
+                    <div style="background: #fff3cd; padding: 10px; border-radius: 6px; margin-top: 10px; text-align: center;">
+                        <span style="color: #856404; font-size: 14px;">
+                            🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !
+                        </span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    /**
+     * ✅ NOUVEAU : Générer un numéro de ticket unique
+     */
+    generateTicketNumber() {
+        const timestamp = Date.now().toString();
+        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        return `TK${timestamp.slice(-6)}${random}`;
+    }
+
+    /**
      * Afficher une erreur dans l'interface
      */
-    showError(errorMessage, errorType = 'error') {
-        const title = this.getErrorTitle(errorType);
+    showError(errorMessage, errorType = 'error', springResponse = null) {
+        const title = this.getErrorTitle(errorType, springResponse);
+        
+        // Ajouter des détails Spring Boot si disponibles
+        let fullMessage = errorMessage;
+        if (springResponse) {
+            if (springResponse.required_amount && springResponse.current_balance) {
+                fullMessage += `\n\nDétails:\n`;
+                fullMessage += `• Montant requis: ${springResponse.required_amount}€\n`;
+                fullMessage += `• Solde actuel: ${springResponse.current_balance}€`;
+            }
+            if (springResponse.transactionId) {
+                fullMessage += `\n• Transaction ID: ${springResponse.transactionId}`;
+            }
+        }
         
         this.dialog.add(AlertDialog, {
             title: title,
-            body: errorMessage,
+            body: fullMessage,
             confirmLabel: _t('OK'),
         });
 
-        // Notification supplémentaire
+        // Notification avec couleur selon le type
+        const notifType = errorType === 'validation_error' ? 'warning' : 'danger';
         this.notification.add(errorMessage, {
-            type: 'danger',
+            type: notifType,
             sticky: false
         });
     }
@@ -176,58 +324,67 @@ class SpringBootApiService {
     }
 
     /**
-     * Afficher une erreur avec détails Spring Boot
+     * ✅ MODIFIÉ : Afficher le succès avec pop-up détaillée
      */
-    showError(errorMessage, errorType = 'error', springResponse = null) {
-        const title = this.getErrorTitle(errorType, springResponse);
-        
-        // Ajouter des détails Spring Boot si disponibles
-        let fullMessage = errorMessage;
+    showSuccess(message, springResponse = null) {
         if (springResponse) {
-            if (springResponse.required_amount && springResponse.current_balance) {
-                fullMessage += `\n\nDétails:\n`;
-                fullMessage += `• Montant requis: ${springResponse.required_amount}€\n`;
-                fullMessage += `• Solde actuel: ${springResponse.current_balance}€`;
-            }
-            if (springResponse.transactionId) {
-                fullMessage += `\n• Transaction ID: ${springResponse.transactionId}`;
-            }
+            // Afficher la pop-up détaillée avec les informations de subvention
+            this.showSuccessPopup(springResponse);
+        } else {
+            // Fallback : notification simple
+            this.notification.add(message || _t('Validation successful'), {
+                type: 'success'
+            });
         }
-        
-        this.dialog.add(AlertDialog, {
-            title: title,
-            body: fullMessage,
-            confirmLabel: _t('OK'),
-        });
-
-        // Notification avec couleur selon le type
-        const notifType = errorType === 'validation_error' ? 'warning' : 'danger';
-        this.notification.add(errorMessage, {
-            type: notifType,
-            sticky: false
-        });
-    }
-
-    /**
-     * Afficher le succès
-     */
-    showSuccess(message) {
-        this.notification.add(message || _t('Validation successful'), {
-            type: 'success'
-        });
     }
 }
 
 /**
- * Extension du ProductScreen pour ajouter le bouton Spring Boot
+ * ✅ NOUVEAU : Patch pour désactiver les taxes dans le POS
  */
 patch(ProductScreen.prototype, {
     setup() {
         super.setup();
         this.springBootApi = new SpringBootApiService(this.env);
         
+        // ✅ Désactiver les taxes au niveau POS
+        this.disablePOSTaxes();
+        
         // Créer le bouton Spring Boot dynamiquement
         this.createSpringBootButton();
+    },
+
+    /**
+     * ✅ NOUVEAU : Désactiver le calcul automatique des taxes dans le POS
+     */
+    disablePOSTaxes() {
+        // Override des méthodes de calcul de taxes si elles existent
+        if (this.pos && this.pos.config) {
+            // Forcer la configuration pour ignorer les taxes
+            this.pos.config.module_account = false;
+            console.log('✅ Taxes POS désactivées');
+        }
+        
+        // Patch des méthodes de calcul de taxes au niveau des orderlines
+        setTimeout(() => {
+            const order = this.pos.get_order();
+            if (order && order.orderlines) {
+                order.orderlines.forEach(line => {
+                    if (line && typeof line.set_unit_price === 'function') {
+                        // Override pour que le prix affiché soit le prix final sans taxes
+                        const originalSetUnitPrice = line.set_unit_price;
+                        line.set_unit_price = function(price) {
+                            // Appeler la méthode originale
+                            originalSetUnitPrice.call(this, price);
+                            // Mais forcer les taxes à 0
+                            if (this.price_subtotal_incl !== undefined) {
+                                this.price_subtotal_incl = this.price_subtotal;
+                            }
+                        };
+                    }
+                });
+            }
+        }, 500);
     },
 
     /**
@@ -244,7 +401,7 @@ patch(ProductScreen.prototype, {
                 springButton.innerHTML = `
                     <i class="fa fa-server" style="color: #28a745; font-size: 18px;"></i>
                     <br/>
-                    <span style="font-size: 11px; font-weight: bold;">Spring Validate</span>
+                    <span style="font-size: 11px; font-weight: bold;">SPRING<br/>VALIDATE</span>
                 `;
                 springButton.addEventListener('click', () => this.validateWithSpringBoot());
                 controlButtons.appendChild(springButton);
@@ -254,7 +411,7 @@ patch(ProductScreen.prototype, {
     },
 
     /**
-     * Valider la commande avec Spring Boot
+     * ✅ MODIFIÉ : Valider la commande avec Spring Boot et afficher pop-up de succès
      */
     async validateWithSpringBoot() {
         console.log('🚀 validateWithSpringBoot appelé');
@@ -297,9 +454,12 @@ patch(ProductScreen.prototype, {
             console.log('Résultat validation:', result);
 
             if (result.success) {
-                this.springBootApi.showSuccess(result.message, result.spring_response);
-                // Optionnel: passer automatiquement au paiement
-                // this.pos.showScreen('PaymentScreen');
+                // ✅ MODIFIÉ : Afficher la pop-up de succès avec détails
+                this.springBootApi.showSuccess(result.message, result);
+                
+                // ✅ Optionnel: Vider le panier après validation réussie
+                // order.finalize();
+                
             } else {
                 this.springBootApi.showError(
                     result.error, 
@@ -319,12 +479,30 @@ patch(ProductScreen.prototype, {
 });
 
 /**
- * Extension du PaymentScreen pour validation automatique
+ * ✅ NOUVEAU : Patch PaymentScreen pour désactiver aussi les taxes
  */
 patch(PaymentScreen.prototype, {
     setup() {
         super.setup();
         this.springBootApi = new SpringBootApiService(this.env);
+        
+        // Désactiver les taxes ici aussi
+        this.disablePaymentTaxes();
+    },
+
+    /**
+     * ✅ NOUVEAU : Désactiver les taxes dans l'écran de paiement
+     */
+    disablePaymentTaxes() {
+        if (this.currentOrder) {
+            // Forcer le total sans taxes
+            const originalGetTotal = this.currentOrder.get_total_with_tax;
+            if (originalGetTotal) {
+                this.currentOrder.get_total_with_tax = function() {
+                    return this.get_total_without_tax();
+                };
+            }
+        }
     },
 
     /**
@@ -391,7 +569,7 @@ export class SpringBootValidateButton extends Component {
             const result = await this.springBootApi.validateOrder(order);
             
             if (result.success) {
-                this.springBootApi.showSuccess(result.message, result.spring_response);
+                this.springBootApi.showSuccess(result.message, result);
             } else {
                 this.springBootApi.showError(
                     result.error, 
