@@ -7,7 +7,7 @@ import { PaymentScreen } from "@point_of_sale/app/screens/payment_screen/payment
 import { patch } from "@web/core/utils/patch";
 import { _t } from "@web/core/l10n/translation";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
-
+import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 /**
  * Service pour gérer les appels API Spring Boot
  */
@@ -133,61 +133,262 @@ class SpringBootApiService {
     /**
      * ✅ CORRIGÉ : Afficher la pop-up de succès avec debug et version simple
      */
-    showSuccessPopup(springResponse) {
-        // ✅ DEBUG : Vérifier les données reçues
-        console.log('🔍 DEBUG - Données Spring Boot reçues:', springResponse);
-        
-        // Récupérer les données de la réponse Spring Boot
-        const data = springResponse.spring_response || springResponse.data || springResponse;
-        
-        console.log('🔍 DEBUG - Data extraite:', data);
-        
-        // Extraire les informations
-        const numeroTicket = this.generateTicketNumber();
-        const date = new Date().toLocaleDateString('fr-FR');
-        const heureTransaction = new Date().toLocaleTimeString('fr-FR');
-        const montantTotal = data.montantTotal || 0;
-        const partSalariale = data.partSalariale || 0;
-        const partPatronale = data.partPatronale || 0;
+    // ✅ REMPLACEZ votre méthode showSuccessPopup par celle-ci :
 
-        console.log('🔍 DEBUG - Montants extraits:', { montantTotal, partSalariale, partPatronale });
+showSuccessPopup(springResponse) {
+    console.log('🔍 DEBUG - Données Spring Boot reçues:', springResponse);
+    
+    // Récupérer les données de la réponse Spring Boot
+    const data = springResponse.spring_response || springResponse.data || springResponse;
+    
+    console.log('🔍 DEBUG - Data extraite:', data);
+    
+    // Extraire les informations
+    const numeroTicket = this.generateTicketNumber();
+    const date = new Date().toLocaleDateString('fr-FR');
+    const heureTransaction = new Date().toLocaleTimeString('fr-FR');
+    const montantTotal = data.montantTotal || 0;
+    const partSalariale = data.partSalariale || 0;
+    const partPatronale = data.partPatronale || 0;
 
-        // ✅ VERSION SIMPLE : Message texte au lieu de HTML complexe
-        const message = `🎉 TRANSACTION RÉUSSIE
+    // ✅ NOUVEAU : Extraire les informations utilisateur
+    const utilisateurNomComplet = data.utilisateurNomComplet || 'Client non identifié';
+    const utilisateurEmail = data.utilisateurEmail || '';
+    const utilisateurCategorie = data.utilisateurCategorie || '';
+
+    console.log('🔍 DEBUG - Utilisateur:', { utilisateurNomComplet, utilisateurEmail, utilisateurCategorie });
+
+    // Extraire les articles de la réponse
+    const articles = data.articles || [];
+    console.log('🔍 DEBUG - Articles extraits:', articles);
+
+    // ✅ VERSION AVEC NOM UTILISATEUR
+    let message = `🎉 TRANSACTION RÉUSSIE
+
+👤 Client: ${utilisateurNomComplet}`;
+
+    // Ajouter l'email si disponible
+    if (utilisateurEmail && utilisateurEmail.trim() !== '') {
+        message += `
+📧 Email: ${utilisateurEmail}`;
+    }
+
+    message += `
 
 📋 Détails:
 • N° Ticket: ${numeroTicket}
 • Date: ${date}
 • Heure: ${heureTransaction}
 
-💰 Détail Financier:
+🛒 Articles achetés:`;
+
+    // Ajouter chaque article
+    if (articles && articles.length > 0) {
+        articles.forEach((article, index) => {
+            const nom = article.nom || article.nomArticle || `Article ${index + 1}`;
+            const quantite = article.quantite || article.quantiteTotale || 1;
+            const prixUnitaire = article.prixUnitaire || 0;
+            const montantArticle = article.montantTotal || (prixUnitaire * quantite);
+            const subvention = article.subventionTotale || 0;
+            const partClient = article.partSalariale || (montantArticle - subvention);
+
+            message += `
+• ${nom} x${quantite}
+  Prix: ${prixUnitaire.toFixed(2)}€ | Total: ${montantArticle.toFixed(2)}€
+  Subvention: ${subvention.toFixed(2)}€ | Votre part: ${partClient.toFixed(2)}€`;
+        });
+    } else {
+        message += `
+• Aucun détail d'article disponible`;
+    }
+
+    message += `
+
+💰 RÉSUMÉ FINANCIER:
 • Prix total: ${montantTotal.toFixed(2)}€
 • Subvention entreprise: ${partPatronale.toFixed(2)}€
 • Votre part: ${partSalariale.toFixed(2)}€
 
-✅ Montant déduit de votre badge avec succès
-${partPatronale > 0 ? `🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ !` : ''}`;
+✅ Montant déduit de votre badge avec succès`;
 
-        // Afficher la pop-up avec message simple
-        this.dialog.add(AlertDialog, {
-            title: _t('✅ Paiement Validé avec Succès'),
-            body: message,
-            confirmLabel: _t('OK'),
-            confirm: () => {
-                console.log('Pop-up de succès fermée');
-            }
-        });
-
-        // Notification de succès supplémentaire
-        this.notification.add(
-            _t('Paiement validé - Subvention entreprise: ') + partPatronale.toFixed(2) + '€',
-            {
-                type: 'success',
-                sticky: false
-            }
-        );
+    if (partPatronale > 0) {
+        message += `
+🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !`;
     }
 
+    // Afficher la pop-up avec message complet
+    // Remplacer cette partie dans votre fonction showSuccessPopup()
+    // Afficher la pop-up avec bouton imprimer
+    this.dialog.add(ConfirmationDialog, {
+        title: _t('✅ Paiement Validé avec Succès'),
+        body: message,
+        confirmLabel: _t('🖨️ Imprimer'),
+        cancelLabel: _t('Fermer'),
+        confirm: () => {
+            console.log('🖨️ Bouton Imprimer cliqué');
+            this.printTicket(data, numeroTicket, date, heureTransaction);
+        },
+        cancel: () => {
+            console.log('Pop-up de succès fermée');
+        }
+    });
+
+    // Notification de succès avec nom utilisateur
+    this.notification.add(
+        _t('Paiement validé pour ') + utilisateurNomComplet.split(' - ')[0] + 
+        _t(' - ') + articles.length + _t(' article(s) - Subvention: ') + partPatronale.toFixed(2) + '€',
+        {
+            type: 'success',
+            sticky: false
+        }
+    );
+}
+/**
+ * ✅ NOUVEAU : Fonction d'impression du ticket
+ */
+printTicket(springData, numeroTicket, date, heureTransaction) {
+    console.log('🖨️ Impression ticket démarrée');
+    
+    // Générer le contenu du ticket format reçu
+    const ticketContent = this.generateTicketContent(springData, numeroTicket, date, heureTransaction);
+    
+    // Ouvrir fenêtre d'impression
+    const printWindow = window.open('', 'TicketPrint', 'width=400,height=600');
+    printWindow.document.write(ticketContent);
+    printWindow.document.close();
+    
+    // Déclencher l'impression automatiquement
+    printWindow.focus();
+    printWindow.print();
+    
+    console.log("✅ Ticket envoyé à l'imprimante");
+}
+
+/**
+ * ✅ NOUVEAU : Générer le contenu du ticket format reçu
+ */
+generateTicketContent(data, numeroTicket, date, heureTransaction) {
+    const articles = data.articles || [];
+    const montantTotal = data.montantTotal || 0;
+    const partSalariale = data.partSalariale || 0;
+    const partPatronale = data.partPatronale || 0;
+    const utilisateurNomComplet = data.utilisateurNomComplet || 'Client';
+    
+    let articlesHtml = '';
+    articles.forEach(article => {
+        const nom = article.nom || 'Article';
+        const quantite = article.quantite || 1;
+        const prixUnitaire = article.prixUnitaire || 0;
+        const montantArticle = article.montantTotal || 0;
+        const subvention = article.subventionTotale || 0;
+        const partClient = article.partSalariale || 0;
+        
+        articlesHtml += `
+        <tr>
+            <td style="text-align: left;">${nom} x${quantite}</td>
+            <td style="text-align: right;">${montantArticle.toFixed(2)}€</td>
+        </tr>
+        <tr>
+            <td style="text-align: right; font-size: 10px; color: #666;">
+                Prix: ${prixUnitaire.toFixed(2)}€ | Subv: ${subvention.toFixed(2)}€
+            </td>
+            <td style="text-align: right; font-size: 10px; color: #666;">
+                Votre part: ${partClient.toFixed(2)}€
+            </td>
+        </tr>
+        `;
+    });
+    
+    return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>Ticket Cantine</title>
+        <style>
+            body { 
+                font-family: 'Courier New', monospace; 
+                font-size: 12px; 
+                margin: 0; 
+                padding: 10px;
+                width: 300px;
+            }
+            .center { text-align: center; }
+            .right { text-align: right; }
+            .bold { font-weight: bold; }
+            .separator { 
+                border-top: 1px dashed #333; 
+                margin: 8px 0; 
+            }
+            table { 
+                width: 100%; 
+                border-collapse: collapse; 
+            }
+            td { 
+                padding: 2px 0; 
+                vertical-align: top; 
+            }
+            .total-line { 
+                border-top: 1px solid #333; 
+                font-weight: bold; 
+            }
+        </style>
+    </head>
+    <body>
+        <div class="center bold">
+            ================================<br>
+            CANTINE ENTREPRISE<br>
+            ================================
+        </div>
+        
+        <div class="separator"></div>
+        
+        <div>
+            <strong>Ticket:</strong> ${numeroTicket}<br>
+            <strong>Date:</strong> ${date}<br>
+            <strong>Heure:</strong> ${heureTransaction}<br>
+            <strong>Client:</strong> ${utilisateurNomComplet}
+        </div>
+        
+        <div class="separator"></div>
+        
+        <div class="bold">ARTICLES:</div>
+        <table>
+            ${articlesHtml}
+        </table>
+        
+        <div class="separator"></div>
+        
+        <table>
+            <tr>
+                <td>Sous-total:</td>
+                <td class="right">${montantTotal.toFixed(2)}€</td>
+            </tr>
+            <tr>
+                <td>Subvention entreprise:</td>
+                <td class="right">-${partPatronale.toFixed(2)}€</td>
+            </tr>
+            <tr class="total-line">
+                <td><strong>À PAYER:</strong></td>
+                <td class="right"><strong>${partSalariale.toFixed(2)}€</strong></td>
+            </tr>
+        </table>
+        
+        <div class="separator"></div>
+        
+        <div class="center">
+            ✅ Montant débité de votre badge<br>
+            ${partPatronale > 0 ? `🎯 Économie: ${partPatronale.toFixed(2)}€` : ''}<br><br>
+            Merci et bon appétit !
+        </div>
+        
+        <div class="center">
+            ================================
+        </div>
+    </body>
+    </html>
+    `;
+}
     /**
      * ✅ NOUVEAU : Construire le contenu HTML de la pop-up de succès
      */
@@ -352,6 +553,111 @@ patch(ProductScreen.prototype, {
         
         // Créer le bouton Spring Boot dynamiquement
         this.createSpringBootButton();
+       this.hidePaymentButton();
+
+    },
+    /**
+     * ✅ APPROCHE EXPERTE : Ciblage direct du bouton Payment
+     */
+    hidePaymentButton() {
+        console.log('🎯 Masquage expert du bouton Payment');
+        
+        // ✅ MÉTHODE 1 : CSS direct par sélecteur précis Odoo POS
+        const style = document.createElement('style');
+        style.textContent = `
+            /* Cibler directement la structure POS d'Odoo */
+            .point-of-sale .actionpad .validation .button.payment,
+            .o-main-components-container .actionpad .validation .payment-button,
+            .pos-content .actionpad .button[data-bs-original-title="Payment"],
+            .actionpad .validation .btn-primary:last-child,
+            
+            /* Structure spécifique Odoo v18 POS */
+            .o_pos_content .o_pos_actionpad .o_pos_validation .payment,
+            .pos-actionpad .pos-payment-button,
+            
+            /* Sélecteur par position (dernier bouton en bas) */
+            .actionpad .validation > .btn:last-child,
+            .pos .control-buttons > button:last-child {
+                display: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // ✅ MÉTHODE 2 : Sélecteur Odoo POS spécifique
+        setTimeout(() => {
+            // Cibler la structure exacte d'Odoo POS
+            const paymentButton = document.querySelector('.actionpad .validation .btn-primary:last-child');
+            if (paymentButton) {
+                paymentButton.style.display = 'none';
+                console.log('✅ Bouton Payment masqué par sélecteur Odoo');
+                return;
+            }
+            
+            // Alternative : cibler par data attribute Odoo
+            const paymentByData = document.querySelector('[data-bs-original-title="Payment"]');
+            if (paymentByData) {
+                paymentByData.style.display = 'none';
+                console.log('✅ Bouton Payment masqué par data attribute');
+                return;
+            }
+            
+            // Alternative : structure POS classique
+            const posPayment = document.querySelector('.pos-content .payment-button');
+            if (posPayment) {
+                posPayment.style.display = 'none';
+                console.log('✅ Bouton Payment masqué par structure POS');
+                return;
+            }
+            
+            console.log('⚠️ Bouton Payment non trouvé avec sélecteurs directs');
+        }, 1000);
+        
+        // ✅ MÉTHODE 3 : Override de la méthode Odoo directement
+        if (this.env && this.env.services && this.env.services.pos) {
+            const pos = this.env.services.pos;
+            
+            // Désactiver la fonction de paiement au niveau service
+            if (pos.showScreen) {
+                const originalShowScreen = pos.showScreen.bind(pos);
+                pos.showScreen = function(screenName, props) {
+                    if (screenName === 'PaymentScreen') {
+                        console.log('🚫 PaymentScreen bloqué au niveau service');
+                        return;
+                    }
+                    return originalShowScreen(screenName, props);
+                };
+            }
+        }
+        
+        console.log('✅ Masquage expert Payment activé');
+    },
+    
+    /**
+     * ✅ ALTERNATIVE : Override du composant Odoo directement
+     */
+    disablePaymentComponent() {
+        // Patch du composant PaymentScreen pour le désactiver
+        if (typeof PaymentScreen !== 'undefined') {
+            const originalSetup = PaymentScreen.prototype.setup;
+            PaymentScreen.prototype.setup = function() {
+                console.log('🚫 PaymentScreen désactivé à la source');
+                // Ne pas appeler setup() = composant inactif
+            };
+        }
+        
+        // Patch du bouton Payment dans ActionPad
+        if (typeof ActionpadWidget !== 'undefined') {
+            const originalRender = ActionpadWidget.prototype._renderElement;
+            ActionpadWidget.prototype._renderElement = function() {
+                const result = originalRender.call(this);
+                // Masquer le bouton Payment après render
+                const paymentBtn = this.el.querySelector('.payment-button, .btn-payment');
+                if (paymentBtn) {
+                    paymentBtn.style.display = 'none';
+                }
+                return result;
+            };
+        }
     },
 
     /**
@@ -409,7 +715,10 @@ patch(ProductScreen.prototype, {
             }
         }, 1000);
     },
-
+    /**
+     * ✅ VERSION CONSERVATIVE : Masquer seulement le bouton Payment sans casser l'interface
+     */
+    
     /**
      * ✅ MODIFIÉ : Valider la commande avec Spring Boot et afficher pop-up de succès
      */

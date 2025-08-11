@@ -63,7 +63,7 @@ class PaymentConnector(models.Model):
             }
 
     def _extract_subsidy_data(self, response_data):
-        """✅ VERSION ULTRA-SIMPLIFIÉE pour debug"""
+        """✅ VERSION FINALE : Extraction COMPLÈTE avec utilisateur"""
         try:
             # ✅ LOG complet des données reçues
             _logger.info(f"🔍 PYTHON DEBUG - Response data COMPLÈTE: {json.dumps(response_data, indent=2)}")
@@ -77,7 +77,13 @@ class PaymentConnector(models.Model):
                 'partPatronale': 0.0,
                 'soldeActuel': 0.0,
                 'nouveauSolde': 0.0,
-                'articles': []
+                'articles': [],
+                # ✅ NOUVEAUX CHAMPS UTILISATEUR
+                'utilisateurNom': '',
+                'utilisateurPrenom': '',
+                'utilisateurEmail': '',
+                'utilisateurCategorie': '',
+                'utilisateurNomComplet': '',
             }
 
             # ✅ EXTRACTION DIRECTE des champs de votre API
@@ -90,33 +96,75 @@ class PaymentConnector(models.Model):
             if 'remainingBalance' in response_data:
                 extracted_data['nouveauSolde'] = float(response_data['remainingBalance'])
 
-            # ✅ CALCULER à partir des articles
-            articles = response_data.get('articles', [])
-            if articles and len(articles) > 0:
-                total_prix = 0.0
-                total_subvention = 0.0
+            # montantTotal, partPatronale depuis les champs directs
+            if 'montantTotal' in response_data:
+                extracted_data['montantTotal'] = float(response_data['montantTotal'])
+            
+            if 'partPatronale' in response_data:
+                extracted_data['partPatronale'] = float(response_data['partPatronale'])
                 
-                for article in articles:
-                    prix_article = float(article.get('montantTotal', 0))
-                    subvention_article = float(article.get('subventionTotale', 0))
+            if 'soldeActuel' in response_data:
+                extracted_data['soldeActuel'] = float(response_data['soldeActuel'])
+
+            # ✅ EXTRACTION DES INFORMATIONS UTILISATEUR
+            if 'utilisateurNom' in response_data:
+                extracted_data['utilisateurNom'] = response_data['utilisateurNom'] or ''
+                
+            if 'utilisateurPrenom' in response_data:
+                extracted_data['utilisateurPrenom'] = response_data['utilisateurPrenom'] or ''
+                
+            if 'utilisateurEmail' in response_data:
+                extracted_data['utilisateurEmail'] = response_data['utilisateurEmail'] or ''
+                
+            if 'utilisateurCategorie' in response_data:
+                extracted_data['utilisateurCategorie'] = response_data['utilisateurCategorie'] or ''
+                
+            if 'utilisateurNomComplet' in response_data:
+                extracted_data['utilisateurNomComplet'] = response_data['utilisateurNomComplet'] or ''
+
+            # ✅ COPIER LES ARTICLES
+            articles_source = response_data.get('articles', [])
+            if articles_source and len(articles_source) > 0:
+                extracted_data['articles'] = []
+                
+                for article in articles_source:
+                    article_data = {
+                        'odooId': article.get('odooId'),
+                        'nom': article.get('nom', 'Article inconnu'),
+                        'quantite': article.get('quantite', 1),
+                        'prixUnitaire': float(article.get('prixUnitaire', 0)),
+                        'montantTotal': float(article.get('montantTotal', 0)),
+                        'subventionTotale': float(article.get('subventionTotale', 0)),
+                        'partSalariale': float(article.get('partSalariale', 0)),
+                        'quantiteAvecSubvention': article.get('quantiteAvecSubvention', 0),
+                        'quantiteSansSubvention': article.get('quantiteSansSubvention', 0)
+                    }
+                    extracted_data['articles'].append(article_data)
                     
-                    total_prix += prix_article
-                    total_subvention += subvention_article
+                _logger.info(f"✅ ARTICLES COPIÉS : {len(extracted_data['articles'])} article(s)")
+            else:
+                _logger.warning("⚠️ Aucun article trouvé dans response_data")
+
+            # ✅ FALLBACK : Si les montants principaux sont manquants, les calculer depuis les articles
+            if extracted_data['montantTotal'] == 0.0 and extracted_data['articles']:
+                total_prix = sum(float(art.get('montantTotal', 0)) for art in extracted_data['articles'])
+                total_subvention = sum(float(art.get('subventionTotale', 0)) for art in extracted_data['articles'])
                 
-                # ✅ ASSIGNER les totaux calculés
                 extracted_data['montantTotal'] = total_prix
                 extracted_data['partPatronale'] = total_subvention
                 
-                # ✅ Si partSalariale pas encore définie, la calculer
+                # Si partSalariale pas encore définie, la calculer
                 if extracted_data['partSalariale'] == 0.0:
                     extracted_data['partSalariale'] = total_prix - total_subvention
                 
-                # ✅ Calculer solde actuel
+                # Calculer solde actuel si manquant
                 if extracted_data['soldeActuel'] == 0.0:
                     extracted_data['soldeActuel'] = extracted_data['nouveauSolde'] + extracted_data['partSalariale']
 
-            # ✅ LOG des données extraites
+            # ✅ LOG des données extraites AVEC utilisateur
             _logger.info(f"🎯 PYTHON DEBUG - Données extraites: {extracted_data}")
+            _logger.info(f"🎯 UTILISATEUR EXTRAIT: {extracted_data['utilisateurNomComplet']}")
+            _logger.info(f"🎯 NOMBRE D'ARTICLES EXTRAITS: {len(extracted_data['articles'])}")
             
             return extracted_data
 
@@ -131,8 +179,14 @@ class PaymentConnector(models.Model):
                 'partPatronale': 0.0,
                 'soldeActuel': 0.0,
                 'nouveauSolde': 0.0,
-                'articles': []
-            }
+                'articles': [],
+                # ✅ Champs utilisateur vides en cas d'erreur
+                'utilisateurNom': '',
+                'utilisateurPrenom': '',
+                'utilisateurEmail': '',
+                'utilisateurCategorie': '',
+                'utilisateurNomComplet': 'Client non identifié',
+        }
 
     def _convert_to_float(self, value):
         if value is None:
@@ -147,6 +201,7 @@ class PaymentConnector(models.Model):
         if isinstance(value, dict) and 'doubleValue' in value:
             return float(value['doubleValue'])
         return 0.0
+
     def validate_payment(self, order_data):
         """Valider le paiement via l'API Spring Boot"""
         self.ensure_one()
