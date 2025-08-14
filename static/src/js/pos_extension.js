@@ -11,7 +11,6 @@ import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
-
 /* ----------------------------------------------------------
  * ✅ POPUP DE LOGIN PROFESSIONNELLE (intégré)
  * ---------------------------------------------------------- */
@@ -361,7 +360,24 @@ CashierName.template = xml`
 `;
 
 patch(CashierName.prototype, {
-    setup() { super.setup(); this.springAuth = this.env.services.springBootNavbar; },
+    
+    setup() { super.setup(); this.springAuth = this.env.services.springBootNavbar;this.setupAuthListener(); },
+    
+    setupAuthListener() {
+        document.addEventListener('spring-auth-updated', (event) => {
+            console.log('🔄 Event reçu: spring-auth-updated', event.detail);
+            
+            // Forcer la mise à jour du service navbar
+            if (this.env.services.springBootNavbar) {
+                this.env.services.springBootNavbar.loadFromStorage();
+            }
+            
+            // Déclencher un re-render du composant
+            if (this.__owl__) {
+            this.__owl__.render();
+            }
+        });
+    },
     getSpringCashierName() {
         const cashier = this.env.services.springBootNavbar?.getCurrentCashier();
         if (cashier) {
@@ -382,6 +398,12 @@ patch(CashierName.prototype, {
         }
     }
 });
+/* ----------------------------------------------------------
+ * ✅ SUPPRIMER LE BOUTON CUSTOMER EN MODE SPRING BOOT
+ * ---------------------------------------------------------- */
+
+
+
 
 /* ----------------------------------------------------------
  * ✅ Auth / Badge / API Services
@@ -430,7 +452,18 @@ class CashierAuthService {
             if (navbarService) {
                 navbarService.currentCashier = this.currentCashier;
                 navbarService.isAuthenticated = true;
+                navbarService.loadFromStorage();
+                console.log('✅ Navbar synchronisé immédiatement avec:', this.currentCashier.nom);
+
             }
+            setTimeout(() => {
+            const event = new CustomEvent('spring-auth-updated', {
+                detail: { cashier: this.currentCashier }
+            });
+            document.dispatchEvent(event);
+        }, 100);
+
+        console.log('🎉 ÉTAPE 4/4 : Authentification complète réussie');
 
             return { success: true, cashier: this.currentCashier, token: this.jwtToken };
         } catch (error) {
@@ -452,18 +485,27 @@ class CashierAuthService {
 
             if (response.ok && result.status === 200) {
                 const allowedRoles = ['ADMIN', 'SUPER_ADMIN', 'CAISSIER'];
-                if (allowedRoles.includes(result.data.role)) {
+                if (allowedRoles.includes(userRole)) {
                     this.jwtToken = token;
                     this.currentCashier = result.data;
                     this.isAuthenticated = true;
                     this.tokenExpiration = parseInt(expiration);
+                    
                     sessionStorage.setItem('pos_cashier', JSON.stringify(this.currentCashier));
-
+                    
+                    // ✅ CORRECTION : Synchronisation navbar améliorée
                     const navbarService = this.env.services.springBootNavbar;
                     if (navbarService) {
                         navbarService.currentCashier = this.currentCashier;
                         navbarService.isAuthenticated = true;
+                        
+                        // ✅ NOUVEAU : Forcer le rechargement
+                        navbarService.loadFromStorage();
+                        
+                        console.log('✅ Navbar synchronisé lors de la vérification token');
                     }
+                    
+                    console.log('✅ Token valide pour navbar:', result.data.nom);
                     return true;
                 }
             }
@@ -507,20 +549,20 @@ class BadgeService {
 
 class SimpleBadgeInterface {
     constructor(springBootApi) { this.springBootApi = springBootApi; this.currentCustomer = null; }
-    create() { this.createBadgeArea(); this.hideCustomerButton(); }
+    create() { this.createBadgeArea();  }
 
-    hideCustomerButton() {
-        setTimeout(() => {
-            const sels = ['.partner-button','.customer-button','.client-button','[data-bs-original-title*="Customer"]','.o_partner_button'];
-            for (const s of sels) {
-                const el = document.querySelector(s);
-                if (el && el.textContent.includes('med kacha')) { el.style.display = 'none'; break; }
-            }
-            document.querySelectorAll('button,.btn,div[role="button"]').forEach(btn=>{
-                if (btn.textContent && btn.textContent.toLowerCase().includes('med kacha')) btn.style.display='none';
-            });
-        }, 1000);
-    }
+    // hideCustomerButton() {
+    //     setTimeout(() => {
+    //         const sels = ['.partner-button','.customer-button','.client-button','[data-bs-original-title*="Customer"]','.o_partner_button'];
+    //         for (const s of sels) {
+    //             const el = document.querySelector(s);
+    //             if (el && el.textContent.includes('med kacha')) { el.style.display = 'none'; break; }
+    //         }
+    //         document.querySelectorAll('button,.btn,div[role="button"]').forEach(btn=>{
+    //             if (btn.textContent && btn.textContent.toLowerCase().includes('med kacha')) btn.style.display='none';
+    //         });
+    //     }, 1000);
+    // }
 
     createBadgeArea() {
         setTimeout(() => {
@@ -909,12 +951,75 @@ patch(ProductScreen.prototype, {
         this.springBootApi.initializeInterface();
         this.createSpringBootButton();
         this.hidePaymentButton();
+        this.hideCustomerButtonDefinitively(); // ← AJOUTEZ CETTE LIGNE
+
 
         const cashier = this.springBootApi.authService.getCurrentCashier();
         if (cashier) {
             this.springBootApi.notification.add(`Session POS: ${cashier.nom} ${cashier.prenom}`, { type: 'success' });
         }
     },
+   hideCustomerButtonDefinitively() {
+    // 🎯 SOLUTION ULTRA-PRÉCISE ET SÛRE
+    
+    // 1. CSS ciblé uniquement sur le bouton exact
+    const style = document.createElement('style');
+    style.id = 'spring-boot-hide-customer';
+    style.textContent = `
+        /* Cibler uniquement le bouton Customer exact d'Odoo 18 */
+        button.set-partner.btn.btn-light.btn-lg.lh-lg.text-truncate.w-auto {
+            display: none !important;
+        }
+        
+        /* Backup pour d'autres structures possibles */
+        .set-partner:has-text("Customer") {
+            display: none !important;
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // 2. JavaScript très précis
+    const hideExactCustomerButton = () => {
+        // Chercher UNIQUEMENT les boutons avec le texte exact "Customer"
+        const customerButtons = document.querySelectorAll('button');
+        customerButtons.forEach(btn => {
+            // Vérifications multiples pour être 100% sûr
+            if (btn.classList.contains('set-partner') && 
+                btn.textContent.trim() === 'Customer') {
+                btn.style.display = 'none';
+                console.log('✅ Bouton Customer masqué par Spring Boot');
+            }
+        });
+    };
+    
+    // 3. Exécuter immédiatement et avec délai
+    hideExactCustomerButton();
+    setTimeout(hideExactCustomerButton, 1000);
+    setTimeout(hideExactCustomerButton, 3000);
+    
+    // 4. Observer TRÈS sélectif
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach(mutation => {
+            mutation.addedNodes.forEach(node => {
+                if (node.nodeType === 1) { // Element node
+                    // Chercher seulement dans les nouveaux éléments
+                    const newCustomerBtn = node.querySelector?.('button.set-partner');
+                    if (newCustomerBtn && newCustomerBtn.textContent.trim() === 'Customer') {
+                        newCustomerBtn.style.display = 'none';
+                        console.log('✅ Nouveau bouton Customer masqué');
+                    }
+                }
+            });
+        });
+    });
+    
+    observer.observe(document.body, { 
+        childList: true, 
+        subtree: true 
+    });
+    
+    console.log('🎯 Système de masquage Customer activé - Ultra-précis');
+},
 
     hidePaymentButton() {
         const style = document.createElement('style');
