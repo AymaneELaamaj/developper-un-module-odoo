@@ -1019,7 +1019,7 @@ patch(ProductScreen.prototype, {
     });
     
     console.log('🎯 Système de masquage Customer activé - Ultra-précis');
-},
+} , 
 
     hidePaymentButton() {
         const style = document.createElement('style');
