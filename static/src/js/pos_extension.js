@@ -1,17 +1,391 @@
 /** @odoo-module **/
 
-import { Component } from "@odoo/owl";
+import { Component, xml, useState } from "@odoo/owl";
 import { useService } from "@web/core/utils/hooks";
+import { usePos } from "@point_of_sale/app/store/pos_hook";
 import { ProductScreen } from "@point_of_sale/app/screens/product_screen/product_screen";
 import { PaymentScreen } from "@point_of_sale/app/screens/payment_screen/payment_screen";
+import { CashierName } from "@point_of_sale/app/navbar/cashier_name/cashier_name";
 import { patch } from "@web/core/utils/patch";
+import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 
-/**
- * ✅ Service d'authentification caissier - VERSION SIMPLIFIÉE
- */
+/* ----------------------------------------------------------
+ * ✅ POPUP DE LOGIN PROFESSIONNELLE (intégré)
+ * ---------------------------------------------------------- */
+class ProfessionalLoginPopup {
+    constructor(springBootApi) {
+        this.springBootApi = springBootApi;
+        this.isVisible = false;
+        this.overlay = null;
+        this.popup = null;
+        this.onSuccessCallback = null;
+    }
+
+    show(onSuccess) {
+        if (this.isVisible) return;
+        this.onSuccessCallback = onSuccess;
+        this.createOverlay();
+        this.createPopup();
+        this.setupEvents();
+        this.animateIn();
+        this.isVisible = true;
+        setTimeout(() => {
+            const emailInput = document.getElementById('pro-login-email');
+            if (emailInput) emailInput.focus();
+        }, 300);
+    }
+
+    hide() {
+        if (!this.isVisible) return;
+        this.animateOut(() => {
+            if (this.overlay) {
+                document.body.removeChild(this.overlay);
+            }
+            this.isVisible = false;
+            this.overlay = null;
+            this.popup = null;
+        });
+    }
+
+    createOverlay() {
+        this.overlay = document.createElement('div');
+        this.overlay.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.75); backdrop-filter: blur(8px);
+            z-index: 10000; display: flex; align-items: center; justify-content: center;
+            opacity: 0; transition: all 0.3s ease;
+        `;
+        document.body.appendChild(this.overlay);
+    }
+
+    createPopup() {
+        this.popup = document.createElement('div');
+        this.popup.innerHTML = this.getPopupHTML();
+        this.popup.style.cssText = `
+            background: white; border-radius: 16px; box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+            width: 400px; height: 620px; overflow: hidden;
+            transform: scale(0.8) translateY(50px);
+            transition: all 0.4s cubic-bezier(0.175,0.885,0.32,1.275);
+            position: relative; display: flex; flex-direction: column;
+        `;
+        this.overlay.appendChild(this.popup);
+    }
+
+    getPopupHTML() {
+        return `
+            <div style="
+                background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                color: white; padding: 24px; text-align: center; flex-shrink: 0;">
+                <div style="
+                    width:64px;height:64px;background:rgba(255,255,255,0.2);
+                    border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;
+                    border:2px solid rgba(255,255,255,0.3);">
+                    <i class="fa fa-building" style="font-size:28px;color:white;"></i>
+                </div>
+                <h2 style="margin:0 0 6px 0;font-size:20px;font-weight:700;">Connexion Caissier</h2>
+                <p style="margin:0;opacity:0.9;font-size:13px;">Système de Cantine Entreprise</p>
+                <div style="
+                    position:absolute;top:12px;right:12px;background:rgba(255,255,255,0.2);
+                    padding:4px 8px;border-radius:12px;font-size:10px;font-weight:600;">
+                    🔒 SÉCURISÉ
+                </div>
+            </div>
+
+            <div style="padding:24px;flex:1;display:flex;flex-direction:column;">
+                <div style="
+                    background: linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);
+                    border-left:3px solid #2196f3; padding:12px; border-radius:6px;
+                    margin-bottom:20px; font-size:12px; color:#1565c0;">
+                    <div style="font-weight:600;margin-bottom:3px;">
+                        <i class="fa fa-info-circle" style="margin-right:6px;"></i>Accès autorisé
+                    </div>
+                    <div style="opacity:0.8;">Rôles: ADMIN, SUPER_ADMIN, CAISSIER</div>
+                </div>
+
+                <form id="pro-login-form" style="flex:1;display:flex;flex-direction:column;">
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;font-size:13px;">
+                            <i class="fa fa-envelope" style="margin-right:6px;color:#6b7280;"></i>Email
+                        </label>
+                        <input type="email" id="pro-login-email" placeholder="votre.email@entreprise.com" autocomplete="email"
+                            style="width:100%;padding:12px;border:2px solid #e5e7eb;border-radius:6px;
+                                   font-size:14px;transition:all .2s;background:#fafafa;box-sizing:border-box;"/>
+                    </div>
+
+                    <div style="margin-bottom:16px;">
+                        <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;font-size:13px;">
+                            <i class="fa fa-lock" style="margin-right:6px;color:#6b7280;"></i>Mot de passe
+                        </label>
+                        <div style="position:relative;">
+                            <input type="password" id="pro-login-password" placeholder="••••••••••••" autocomplete="current-password"
+                                style="width:100%;padding:12px 40px 12px 12px;border:2px solid #e5e7eb;border-radius:6px;
+                                       font-size:14px;transition:all .2s;background:#fafafa;box-sizing:border-box;"/>
+                            <button type="button" id="password-toggle" style="
+                                position:absolute;right:8px;top:50%;transform:translateY(-50%);
+                                background:none;border:none;color:#6b7280;cursor:pointer;padding:6px;">
+                                <i class="fa fa-eye" id="password-toggle-icon"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="pro-login-status" style="height:20px;margin-bottom:16px;text-align:center;font-size:12px;font-weight:500;"></div>
+
+                    <div style="display:flex;gap:10px;margin-top:auto;">
+                        <button type="button" id="pro-login-cancel" style="
+                            flex:1;padding:12px;background:#f3f4f6;color:#374151;border:1px solid #e5e7eb;
+                            border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;">
+                            <i class="fa fa-times" style="margin-right:6px;"></i>ANNULER
+                        </button>
+
+                        <button type="submit" id="pro-login-submit" style="
+                            flex:2;padding:12px;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+                            color:white;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;
+                            transition:all .2s;box-shadow:0 3px 8px rgba(102,126,234,.3);">
+                            <i class="fa fa-sign-in" style="margin-right:6px;"></i>
+                            <span id="login-btn-text">SE CONNECTER</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div style="
+                background:#f8fafc;padding:12px 24px;text-align:center;border-top:1px solid #e5e7eb;
+                font-size:11px;color:#6b7280;flex-shrink:0;">
+                <i class="fa fa-shield" style="margin-right:4px;color:#10b981;"></i>
+                Connexion JWT sécurisée • Session 8h
+            </div>
+        `;
+    }
+
+    setupEvents() {
+        this.overlay.addEventListener('click', (e) => { if (e.target === this.overlay) this.cancel(); });
+
+        const cancelBtn = document.getElementById('pro-login-cancel');
+        if (cancelBtn) cancelBtn.addEventListener('click', () => this.cancel());
+
+        const loginForm = document.getElementById('pro-login-form');
+        if (loginForm) loginForm.addEventListener('submit', (e) => { e.preventDefault(); this.handleLogin(); });
+
+        const passwordToggle = document.getElementById('password-toggle');
+        if (passwordToggle) passwordToggle.addEventListener('click', this.togglePassword);
+
+        const emailInput = document.getElementById('pro-login-email');
+        const passwordInput = document.getElementById('pro-login-password');
+
+        if (emailInput) {
+            emailInput.addEventListener('focus', (e) => { e.target.style.borderColor = '#667eea'; e.target.style.background = 'white'; });
+            emailInput.addEventListener('blur',  (e) => { e.target.style.borderColor = '#e5e7eb'; e.target.style.background = '#fafafa'; });
+            emailInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && passwordInput) passwordInput.focus(); });
+        }
+        if (passwordInput) {
+            passwordInput.addEventListener('focus', (e) => { e.target.style.borderColor = '#667eea'; e.target.style.background = 'white'; });
+            passwordInput.addEventListener('blur',  (e) => { e.target.style.borderColor = '#e5e7eb'; e.target.style.background = '#fafafa'; });
+            passwordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') this.handleLogin(); });
+        }
+
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.isVisible) this.cancel(); });
+    }
+
+    togglePassword() {
+        const passwordInput = document.getElementById('pro-login-password');
+        const toggleIcon = document.getElementById('password-toggle-icon');
+        if (passwordInput && toggleIcon) {
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.className = 'fa fa-eye-slash';
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.className = 'fa fa-eye';
+            }
+        }
+    }
+
+    animateIn() {
+        setTimeout(() => { this.overlay.style.opacity = '1'; }, 10);
+        setTimeout(() => { this.popup.style.transform = 'scale(1) translateY(0)'; }, 100);
+    }
+
+    animateOut(callback) {
+        this.popup.style.transform = 'scale(0.9) translateY(30px)';
+        this.popup.style.opacity = '0';
+        setTimeout(() => { this.overlay.style.opacity = '0'; }, 100);
+        setTimeout(() => { if (callback) callback(); }, 300);
+    }
+
+    cancel() {
+        this.hide();
+        setTimeout(() => { window.location.href = '/web'; }, 400);
+    }
+
+    async handleLogin() {
+        const emailInput = document.getElementById('pro-login-email');
+        const passwordInput = document.getElementById('pro-login-password');
+        const email = emailInput?.value?.trim();
+        const password = passwordInput?.value?.trim();
+
+        if (!email || !password) { this.updateStatus('⚠️ Champs requis', '#f59e0b'); return; }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) { this.updateStatus('📧 Email invalide', '#ef4444'); return; }
+
+        try {
+            this.setLoadingState(true);
+            this.updateStatus('🔄 Connexion...', '#3b82f6');
+
+            const result = await this.springBootApi.authService.authenticateCashier(email, password);
+
+            if (result.success) {
+                this.updateStatus('✅ Connexion réussie !', '#10b981');
+                setTimeout(() => {
+                    this.hide();
+                    if (this.onSuccessCallback) this.onSuccessCallback(result);
+                }, 800);
+            } else {
+                this.setLoadingState(false);
+                this.updateStatus(`❌ ${result.error}`, '#ef4444');
+                setTimeout(() => { emailInput?.focus(); }, 500);
+            }
+        } catch (error) {
+            this.setLoadingState(false);
+            this.updateStatus('❌ Erreur connexion', '#ef4444');
+        }
+    }
+
+    setLoadingState(loading) {
+        const submitBtn = document.getElementById('pro-login-submit');
+        const btnText = document.getElementById('login-btn-text');
+        const emailInput = document.getElementById('pro-login-email');
+        const passwordInput = document.getElementById('pro-login-password');
+
+        if (loading) {
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.7'; }
+            if (btnText) { btnText.innerHTML = '<i class="fa fa-spinner fa-spin" style="margin-right:6px;"></i>CONNEXION...'; }
+            if (emailInput) emailInput.disabled = true;
+            if (passwordInput) passwordInput.disabled = true;
+        } else {
+            if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = '1'; }
+            if (btnText) { btnText.innerHTML = '<i class="fa fa-sign-in" style="margin-right:6px;"></i>SE CONNECTER'; }
+            if (emailInput) emailInput.disabled = false;
+            if (passwordInput) passwordInput.disabled = false;
+        }
+    }
+
+    updateStatus(message, color = '#6b7280') {
+        const statusDiv = document.getElementById('pro-login-status');
+        if (statusDiv) { statusDiv.textContent = message; statusDiv.style.color = color; }
+    }
+}
+
+/* ----------------------------------------------------------
+ * ✅ SERVICE SPRING BOOT NAVBAR
+ * ---------------------------------------------------------- */
+class SpringBootAuthService {
+    constructor() {
+        this.currentCashier = null;
+        this.isAuthenticated = false;
+        this.loadFromStorage();
+    }
+    loadFromStorage() {
+        try {
+            const cashier = sessionStorage.getItem('pos_cashier');
+            const token = sessionStorage.getItem('pos_jwt_token');
+            const expiration = sessionStorage.getItem('pos_token_expiration');
+            if (cashier && token && expiration && Date.now() < parseInt(expiration)) {
+                this.currentCashier = JSON.parse(cashier);
+                this.isAuthenticated = true;
+                console.log('✅ Caissier Spring Boot chargé pour navbar:', this.currentCashier.nom);
+            }
+        } catch (error) {
+            console.log('⚠️ Pas de caissier Spring Boot stocké pour navbar');
+        }
+    }
+    getCurrentCashier() { return this.currentCashier; }
+    isAuth() { return this.isAuthenticated && this.currentCashier; }
+    logout() {
+        this.currentCashier = null;
+        this.isAuthenticated = false;
+        sessionStorage.removeItem('pos_jwt_token');
+        sessionStorage.removeItem('pos_cashier');
+        sessionStorage.removeItem('pos_token_expiration');
+        console.log('🚪 Déconnexion Spring Boot navbar');
+    }
+}
+
+const springBootNavbarService = {
+    dependencies: [],
+    start(env) {
+        console.log('🚀 Service SpringBoot Navbar démarré');
+        return new SpringBootAuthService();
+    },
+};
+registry.category("services").add("springBootNavbar", springBootNavbarService);
+
+/* ----------------------------------------------------------
+ * ✅ OVERRIDE CASHIER NAME (Navbar POS)
+ * ---------------------------------------------------------- */
+CashierName.template = xml`
+    <t t-if="env.services.springBootNavbar?.isAuth()">
+        <div class="spring-cashier-header"
+             t-on-click="onSpringLogout"
+             style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white; padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer;
+                    display: flex; align-items: center; gap: 8px; min-width: 200px; max-width: 280px;
+                    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2); transition: all 0.3s ease;
+                    border: 2px solid rgba(255, 255, 255, 0.2);"
+             title="Cliquer pour se déconnecter">
+            <div style="width:28px;height:28px;background:rgba(255,255,255,0.25);
+                        border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                <i class="fa fa-user" style="font-size:14px;"/>
+            </div>
+            <div style="flex:1;text-align:left;overflow:hidden;">
+                <div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+                     t-esc="getSpringCashierName()"/>
+                <div style="font-size:10px;opacity:0.85;">Caissier connecté</div>
+            </div>
+            <div style="width:24px;height:24px;background:rgba(255,255,255,0.2);
+                        border-radius:50%;display:flex;align-items:center;justify-content:center;">
+                <i class="fa fa-sign-out" style="font-size:11px;"/>
+            </div>
+        </div>
+    </t>
+    <t t-else="">
+        <button t-att-class="cssClass"
+                class="cashier-name btn btn-light btn-lg lh-lg d-flex align-items-center gap-2 flex-shrink-0 h-100">
+            <img t-att-src="avatar" t-att-alt="username" class="avatar rounded-3"/>
+            <span t-if="!ui.isSmall" t-esc="username" class="username d-none d-xl-inline-block text-truncate"/>
+        </button>
+    </t>
+`;
+
+patch(CashierName.prototype, {
+    setup() { super.setup(); this.springAuth = this.env.services.springBootNavbar; },
+    getSpringCashierName() {
+        const cashier = this.env.services.springBootNavbar?.getCurrentCashier();
+        if (cashier) {
+            const nom = cashier.nom || '', prenom = cashier.prenom || '', email = cashier.email || '';
+            if (nom && prenom) return `${prenom} ${nom}`;
+            if (nom) return nom;
+            if (email) return email.split('@')[0];
+        }
+        return 'Caissier';
+    },
+    onSpringLogout() {
+        const springAuth = this.env.services.springBootNavbar;
+        const cashierName = this.getSpringCashierName();
+        if (confirm(`Voulez-vous vous déconnecter ?\n\nUtilisateur: ${cashierName}`)) {
+            springAuth.logout();
+            this.env.services.notification.add(`Au revoir ${cashierName} !`, { type: 'info' });
+            setTimeout(() => { window.location.href = '/web'; }, 1500);
+        }
+    }
+});
+
+/* ----------------------------------------------------------
+ * ✅ Auth / Badge / API Services
+ * ---------------------------------------------------------- */
 class CashierAuthService {
     constructor(env) {
         this.env = env;
@@ -23,79 +397,26 @@ class CashierAuthService {
         this.tokenExpiration = null;
     }
 
-    /**
-     * Authentifier le caissier
-     */
     async authenticateCashier(email, password) {
         try {
-            console.log('🔐 ÉTAPE 1/4 : Login caissier...', email);
-            
-            // ÉTAPE 1 : Login avec debug détaillé
-            console.log('🌐 Envoi requête vers:', 'http://localhost:8080/api/auth/login');
-            console.log('📤 Données envoyées:', { email, password: '***' });
-            
-            // ✅ NOUVEAU : Headers explicites identiques à la console
-            const headers = {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            };
-            
-            console.log('📋 Headers envoyés:', headers);
-            
-            const requestBody = JSON.stringify({ email, password });
-            console.log('📦 Body exact:', requestBody);
-            
+            const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
             const loginResponse = await fetch('http://localhost:8080/api/auth/login', {
-                method: 'POST',
-                headers: headers,
-                body: requestBody,
-                mode: 'cors',
-                credentials: 'omit'  // ✅ Pas de cookies/credentials
+                method: 'POST', headers, body: JSON.stringify({ email, password }), mode: 'cors', credentials: 'omit'
             });
-
-            console.log('📥 Réponse reçue - Status:', loginResponse.status);
-            console.log('📥 Réponse reçue - OK:', loginResponse.ok);
-            
             const loginResult = await loginResponse.json();
-            console.log('📋 Données JSON:', loginResult);
-
-            if (!loginResponse.ok || loginResult.status !== 200) {
-                console.error('❌ Erreur dans la réponse:', loginResult);
-                throw new Error(loginResult.message || 'Authentification échouée');
-            }
-
+            if (!loginResponse.ok || loginResult.status !== 200) throw new Error(loginResult.message || 'Authentification échouée');
             const tempJWT = loginResult.token;
-            console.log('✅ ÉTAPE 1/4 : JWT récupéré');
 
-            // ÉTAPE 2 : Vérification compte
-            console.log('🔍 ÉTAPE 2/4 : Vérification du rôle...');
             const accountResponse = await fetch('http://localhost:8080/api/utilisateurs/account', {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${tempJWT}`,
-                    'Content-Type': 'application/json'
-                }
+                method: 'GET', headers: { 'Authorization': `Bearer ${tempJWT}`, 'Content-Type': 'application/json' }
             });
-
             const accountResult = await accountResponse.json();
+            if (!accountResponse.ok || accountResult.status !== 200) throw new Error('Erreur vérification du compte');
 
-            if (!accountResponse.ok || accountResult.status !== 200) {
-                throw new Error('Erreur vérification du compte');
-            }
-
-            console.log('✅ ÉTAPE 2/4 : Données compte récupérées');
-
-            // ÉTAPE 3 : Vérifier rôle
             const userRole = accountResult.data.role;
             const allowedRoles = ['ADMIN', 'SUPER_ADMIN', 'CAISSIER'];
-            
-            if (!allowedRoles.includes(userRole)) {
-                throw new Error(`Accès refusé - Rôle "${userRole}" non autorisé`);
-            }
+            if (!allowedRoles.includes(userRole)) throw new Error(`Accès refusé - Rôle "${userRole}" non autorisé`);
 
-            console.log(`✅ ÉTAPE 3/4 : Rôle "${userRole}" autorisé`);
-
-            // ÉTAPE 4 : Stocker
             this.jwtToken = tempJWT;
             this.currentCashier = accountResult.data;
             this.isAuthenticated = true;
@@ -105,374 +426,124 @@ class CashierAuthService {
             sessionStorage.setItem('pos_cashier', JSON.stringify(this.currentCashier));
             sessionStorage.setItem('pos_token_expiration', this.tokenExpiration.toString());
 
-            console.log('🎉 ÉTAPE 4/4 : Authentification complète réussie');
+            const navbarService = this.env.services.springBootNavbar;
+            if (navbarService) {
+                navbarService.currentCashier = this.currentCashier;
+                navbarService.isAuthenticated = true;
+            }
 
-            return {
-                success: true,
-                cashier: this.currentCashier,
-                token: this.jwtToken
-            };
-
+            return { success: true, cashier: this.currentCashier, token: this.jwtToken };
         } catch (error) {
-            console.error('❌ Erreur authentification:', error);
-            return {
-                success: false,
-                error: error.message
-            };
+            return { success: false, error: error.message };
         }
     }
 
-    /**
-     * Vérifier token existant
-     */
     async verifyExistingToken() {
         try {
             const token = sessionStorage.getItem('pos_jwt_token');
             const expiration = sessionStorage.getItem('pos_token_expiration');
-            
-            if (!token || !expiration) {
-                console.log('❌ Pas de token stocké');
-                return false;
-            }
+            if (!token || !expiration) return false;
+            if (Date.now() > parseInt(expiration)) { this.logout(); return false; }
 
-            if (Date.now() > parseInt(expiration)) {
-                console.log('❌ Token expiré (8H)');
-                this.logout();
-                return false;
-            }
-
-            console.log('🔍 Vérification token...');
             const response = await fetch('http://localhost:8080/api/utilisateurs/account', {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
+                method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
             });
-
             const result = await response.json();
 
             if (response.ok && result.status === 200) {
-                const userRole = result.data.role;
                 const allowedRoles = ['ADMIN', 'SUPER_ADMIN', 'CAISSIER'];
-                
-                if (allowedRoles.includes(userRole)) {
+                if (allowedRoles.includes(result.data.role)) {
                     this.jwtToken = token;
                     this.currentCashier = result.data;
                     this.isAuthenticated = true;
                     this.tokenExpiration = parseInt(expiration);
-                    
                     sessionStorage.setItem('pos_cashier', JSON.stringify(this.currentCashier));
-                    
-                    console.log('✅ Token valide pour:', result.data.nom);
+
+                    const navbarService = this.env.services.springBootNavbar;
+                    if (navbarService) {
+                        navbarService.currentCashier = this.currentCashier;
+                        navbarService.isAuthenticated = true;
+                    }
                     return true;
                 }
             }
-            
-            console.log('❌ Token invalide');
             this.logout();
             return false;
-
-        } catch (error) {
-            console.error('❌ Erreur vérification:', error);
+        } catch {
             this.logout();
             return false;
         }
     }
 
-    async loadStoredAuth() {
-        return await this.verifyExistingToken();
-    }
-
+    async loadStoredAuth() { return await this.verifyExistingToken(); }
     logout() {
-        this.jwtToken = null;
-        this.currentCashier = null;
-        this.isAuthenticated = false;
-        this.tokenExpiration = null;
-        
+        this.jwtToken = null; this.currentCashier = null; this.isAuthenticated = false; this.tokenExpiration = null;
         sessionStorage.removeItem('pos_jwt_token');
         sessionStorage.removeItem('pos_cashier');
         sessionStorage.removeItem('pos_token_expiration');
-        
-        console.log('🚪 Déconnexion effectuée');
+        const navbarService = this.env.services.springBootNavbar;
+        if (navbarService) navbarService.logout();
     }
-
     getJWTToken() { return this.jwtToken; }
     getCurrentCashier() { return this.currentCashier; }
-    isTokenValid() { 
-        return this.isAuthenticated && this.tokenExpiration && Date.now() < this.tokenExpiration; 
-    }
+    isTokenValid() { return this.isAuthenticated && this.tokenExpiration && Date.now() < this.tokenExpiration; }
 }
 
-/**
- * ✅ Service de gestion des badges - VERSION SIMPLIFIÉE
- */
 class BadgeService {
-    constructor(env, authService) {
-        this.env = env;
-        this.authService = authService;
-        this.notification = env.services.notification;
-    }
-
+    constructor(env, authService) { this.env = env; this.authService = authService; this.notification = env.services.notification; }
     async validateBadge(badgeCode) {
         try {
             const jwt = this.authService.getJWTToken();
-            if (!jwt || !this.authService.isTokenValid()) {
-                throw new Error('Session expirée');
-            }
-
-            console.log('🔍 Validation badge:', badgeCode);
-            
+            if (!jwt || !this.authService.isTokenValid()) throw new Error('Session expirée');
             const response = await fetch(`http://localhost:8080/api/utilisateurs/badge?codeBadge=${badgeCode}`, {
-                method: 'GET',
-                headers: {
-                    'Authorization': `Bearer ${jwt}`,
-                    'Content-Type': 'application/json'
-                }
+                method: 'GET', headers: { 'Authorization': `Bearer ${jwt}`, 'Content-Type': 'application/json' }
             });
-
             const result = await response.json();
-
-            if (response.ok && result.status === 200) {
-                console.log('✅ Badge valide pour:', result.data.nom);
-                return {
-                    success: true,
-                    customer: result.data
-                };
-            } else {
-                console.log('❌ Badge invalide:', result.message);
-                return {
-                    success: false,
-                    error: result.message || 'Badge non valide'
-                };
-            }
-
-        } catch (error) {
-            console.error('❌ Erreur badge:', error);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
+            if (response.ok && result.status === 200) return { success: true, customer: result.data };
+            return { success: false, error: result.message || 'Badge non valide' };
+        } catch (error) { return { success: false, error: error.message }; }
     }
 }
 
-/**
- * ✅ Interface badge - VERSION SIMPLIFIÉE
- */
 class SimpleBadgeInterface {
-    constructor(springBootApi) {
-        this.springBootApi = springBootApi;
-        this.currentCustomer = null;
-    }
+    constructor(springBootApi) { this.springBootApi = springBootApi; this.currentCustomer = null; }
+    create() { this.createBadgeArea(); this.hideCustomerButton(); }
 
-    create() {
-        console.log('🎨 Création interface badge...');
-        this.replaceCashierHeader();
-        this.createBadgeArea();
-    }
-
-    /**
-     * ✅ CORRIGÉ : Remplacer l'en-tête Mitchell Admin ET supprimer "med kacha"
-     */
-    replaceCashierHeader() {
-        setTimeout(() => {
-            // ✅ CORRECTION 1 : Remplacer Mitchell Admin en haut à droite
-            const userMenuSelectors = [
-                '.o_user_menu',
-                '.navbar .dropdown',
-                '.o_main_navbar .dropdown',
-                '.o_navbar_apps_menu + .dropdown'
-            ];
-
-            let userMenu = null;
-            for (const selector of userMenuSelectors) {
-                userMenu = document.querySelector(selector);
-                if (userMenu) break;
-            }
-
-            if (userMenu) {
-                const cashier = this.springBootApi.authService.getCurrentCashier();
-                const cashierName = cashier ? `${cashier.nom} ${cashier.prenom}` : 'Caissier';
-                
-                console.log('✅ Remplacement en-tête Mitchell Admin pour:', cashierName);
-                
-                userMenu.innerHTML = `
-                    <div style="
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: white;
-                        padding: 8px 16px;
-                        border-radius: 20px;
-                        font-weight: bold;
-                        cursor: pointer;
-                        display: flex;
-                        align-items: center;
-                        gap: 8px;
-                    " onclick="window.posLogout()">
-                        <i class="fa fa-user-circle"></i>
-                        <span>${cashierName}</span>
-                        <i class="fa fa-sign-out" title="Déconnexion"></i>
-                    </div>
-                `;
-
-                // Fonction de déconnexion globale
-                window.posLogout = () => {
-                    if (confirm('Voulez-vous vous déconnecter ?')) {
-                        this.springBootApi.authService.logout();
-                        window.location.reload();
-                    }
-                };
-            } else {
-                console.log('⚠️ En-tête Mitchell Admin non trouvé');
-            }
-
-            // ✅ CORRECTION 2 : Supprimer "med kacha" en bas à gauche
-            this.hideCustomerButton();
-        }, 2000);
-    }
-
-    /**
-     * ✅ NOUVEAU : Supprimer le bouton client "med kacha"
-     */
     hideCustomerButton() {
         setTimeout(() => {
-            const customerButtonSelectors = [
-                '.partner-button',
-                '.customer-button', 
-                '.client-button',
-                '[data-bs-original-title*="Customer"]',
-                '.o_partner_button'
-            ];
-
-            for (const selector of customerButtonSelectors) {
-                const customerBtn = document.querySelector(selector);
-                if (customerBtn && customerBtn.textContent.includes('med kacha')) {
-                    customerBtn.style.display = 'none';
-                    console.log('✅ Bouton "med kacha" supprimé');
-                    break;
-                }
+            const sels = ['.partner-button','.customer-button','.client-button','[data-bs-original-title*="Customer"]','.o_partner_button'];
+            for (const s of sels) {
+                const el = document.querySelector(s);
+                if (el && el.textContent.includes('med kacha')) { el.style.display = 'none'; break; }
             }
-
-            // Alternative : chercher par contenu texte
-            const allButtons = document.querySelectorAll('button, .btn, div[role="button"]');
-            allButtons.forEach(btn => {
-                if (btn.textContent && btn.textContent.toLowerCase().includes('med kacha')) {
-                    btn.style.display = 'none';
-                    console.log('✅ Élément "med kacha" supprimé par contenu');
-                }
+            document.querySelectorAll('button,.btn,div[role="button"]').forEach(btn=>{
+                if (btn.textContent && btn.textContent.toLowerCase().includes('med kacha')) btn.style.display='none';
             });
         }, 1000);
     }
 
-    /**
-     * ✅ Créer zone badge simple
-     */
     createBadgeArea() {
         setTimeout(() => {
-            // Rechercher zone à remplacer
-            const targetSelectors = [
-                '.partner-button',
-                '.customer-display',
-                '.o_partner_button'
-            ];
-
-            let targetArea = null;
-            for (const selector of targetSelectors) {
-                targetArea = document.querySelector(selector);
-                if (targetArea) break;
-            }
-
-            if (targetArea) {
-                console.log('✅ Zone client trouvée, remplacement...');
-                targetArea.innerHTML = this.getBadgeHTML();
-                this.setupBadgeEvents();
-            } else {
-                console.log('⚠️ Zone client non trouvée, création nouvelle zone...');
-                this.createNewBadgeArea();
-            }
+            const target = ['.partner-button','.customer-display','.o_partner_button'].map(s=>document.querySelector(s)).find(Boolean);
+            if (target) { target.innerHTML = this.getBadgeHTML(); this.setupBadgeEvents(); }
+            else this.createNewBadgeArea();
         }, 1500);
     }
 
     getBadgeHTML() {
         return `
-            <div id="pos-badge-interface" style="
-                background: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                padding: 12px;
-                margin: 4px 0;
-                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-                font-size: 13px;
-            ">
-                <!-- Affichage client compact -->
-                <div id="customer-display" style="
-                    background: #f8f9fa;
-                    border: 1px solid #e9ecef;
-                    border-radius: 4px;
-                    padding: 8px 12px;
-                    margin-bottom: 8px;
-                    text-align: center;
-                    min-height: 32px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                ">
-                    <div style="color: #6c757d; font-size: 12px;">
-                        <i class="fa fa-user-o" style="margin-right: 6px;"></i>
-                        <span>Aucun client</span>
-                    </div>
+            <div id="pos-badge-interface" style="background:white;border:1px solid #e0e0e0;border-radius:6px;
+                 padding:12px;margin:4px 0;box-shadow:0 1px 3px rgba(0,0,0,0.1);font-size:13px;">
+                <div id="customer-display" style="background:#f8f9fa;border:1px solid #e9ecef;border-radius:4px;
+                     padding:8px 12px;margin-bottom:8px;text-align:center;min-height:32px;display:flex;align-items:center;justify-content:center;">
+                    <div style="color:#6c757d;font-size:12px;"><i class="fa fa-user-o" style="margin-right:6px;"></i><span>Aucun client</span></div>
                 </div>
-
-                <!-- Zone scan compacte -->
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    <label style="
-                        font-weight: 500;
-                        color: #495057;
-                        font-size: 12px;
-                        white-space: nowrap;
-                    ">
-                        🏷️ Badge:
-                    </label>
-                    
-                    <input 
-                        type="text" 
-                        id="badge-input" 
-                        placeholder="Scanner badge..."
-                        style="
-                            flex: 1;
-                            padding: 6px 8px;
-                            border: 1px solid #ced4da;
-                            border-radius: 3px;
-                            font-size: 12px;
-                            min-width: 120px;
-                        "
-                    />
-                    
-                    <button 
-                        id="validate-badge"
-                        style="
-                            padding: 6px 10px;
-                            background: #28a745;
-                            color: white;
-                            border: none;
-                            border-radius: 3px;
-                            cursor: pointer;
-                            font-size: 11px;
-                            font-weight: 500;
-                        "
-                    >
-                        ✓
-                    </button>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <label style="font-weight:500;color:#495057;font-size:12px;white-space:nowrap;">🏷️ Badge:</label>
+                    <input type="text" id="badge-input" placeholder="Scanner badge..." style="flex:1;padding:6px 8px;border:1px solid #ced4da;border-radius:3px;font-size:12px;min-width:120px;"/>
+                    <button id="validate-badge" style="padding:6px 10px;background:#28a745;color:white;border:none;border-radius:3px;cursor:pointer;font-size:11px;font-weight:500;">✓</button>
                 </div>
-                
-                <div id="badge-status" style="
-                    margin-top: 4px;
-                    font-size: 10px;
-                    color: #6c757d;
-                    text-align: center;
-                ">
-                    Prêt
-                </div>
+                <div id="badge-status" style="margin-top:4px;font-size:10px;color:#6c757d;text-align:center;">Prêt</div>
             </div>
         `;
     }
@@ -480,23 +551,11 @@ class SimpleBadgeInterface {
     createNewBadgeArea() {
         const badgeContainer = document.createElement('div');
         badgeContainer.innerHTML = this.getBadgeHTML();
-        
-        // ✅ NOUVEAU : Positionner de manière professionnelle
-        const posContent = document.querySelector('.pos-content, .o_pos_content, .point-of-sale');
+        const posContent = document.querySelector('.pos-content,.o_pos_content,.point-of-sale');
         if (posContent) {
-            // Chercher la zone gauche du POS (zone panier/total)
-            const leftPanel = posContent.querySelector('.leftpane, .order-summary, .pos-leftpane');
-            
-            if (leftPanel) {
-                // Insérer en haut de la zone gauche
-                leftPanel.insertBefore(badgeContainer, leftPanel.firstChild);
-                console.log('✅ Interface badge intégrée dans panneau gauche');
-            } else {
-                // Fallback : en haut du contenu principal
-                posContent.insertBefore(badgeContainer, posContent.firstChild);
-                console.log('✅ Interface badge en haut du contenu');
-            }
-            
+            const leftPanel = posContent.querySelector('.leftpane,.order-summary,.pos-leftpane');
+            if (leftPanel) leftPanel.insertBefore(badgeContainer, leftPanel.firstChild);
+            else posContent.insertBefore(badgeContainer, posContent.firstChild);
             this.setupBadgeEvents();
         }
     }
@@ -504,243 +563,131 @@ class SimpleBadgeInterface {
     setupBadgeEvents() {
         const badgeInput = document.getElementById('badge-input');
         const validateBtn = document.getElementById('validate-badge');
-
         if (badgeInput && validateBtn) {
-            console.log('✅ Events badge configurés');
-            
-            // Validation sur Entrée
-            badgeInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    this.validateBadge();
-                }
-            });
-
-            // Validation sur bouton
-            validateBtn.addEventListener('click', () => {
-                this.validateBadge();
-            });
-
-            // Focus automatique
+            badgeInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.validateBadge(); } });
+            validateBtn.addEventListener('click', () => this.validateBadge());
             badgeInput.focus();
-        } else {
-            console.log('❌ Éléments badge non trouvés');
         }
     }
 
     async validateBadge() {
         const badgeInput = document.getElementById('badge-input');
-        const statusDiv = document.getElementById('badge-status');
         const customerDisplay = document.getElementById('customer-display');
-        
-        const badgeCode = badgeInput.value.trim();
-
-        if (!badgeCode) {
-            this.updateStatus('⚠️ Code badge requis', '#ffc107');
-            return;
-        }
+        const code = badgeInput.value.trim();
+        if (!code) { this.updateStatus('⚠️ Code badge requis', '#ffc107'); return; }
 
         try {
             this.updateStatus('🔄 Validation...', '#17a2b8');
-            
-            const result = await this.springBootApi.badgeService.validateBadge(badgeCode);
-
+            const result = await this.springBootApi.badgeService.validateBadge(code);
             if (result.success) {
-                // Succès
                 this.currentCustomer = result.customer;
                 this.updateStatus('✅ Badge valide', '#28a745');
-                
-                // Afficher client compact
                 customerDisplay.innerHTML = `
-                    <div style="text-align: center;">
-                        <div style="
-                            background: #28a745;
-                            color: white;
-                            padding: 4px 8px;
-                            border-radius: 12px;
-                            display: inline-flex;
-                            align-items: center;
-                            font-size: 11px;
-                            font-weight: 500;
-                        ">
-                            <i class="fa fa-user" style="margin-right: 4px; font-size: 10px;"></i>
+                    <div style="text-align:center;">
+                        <div style="background:#28a745;color:white;padding:4px 8px;border-radius:12px;display:inline-flex;align-items:center;font-size:11px;font-weight:500;">
+                            <i class="fa fa-user" style="margin-right:4px;font-size:10px;"></i>
                             ${result.customer.nom} ${result.customer.prenom}
                         </div>
-                        <div style="font-size: 10px; color: #666; margin-top: 2px;">
+                        <div style="font-size:10px;color:#666;margin-top:2px;">
                             Solde: ${result.customer.solde ? result.customer.solde.toFixed(2) + '€' : 'N/A'}
                         </div>
-                    </div>
-                `;
-
-                // Notification
-                this.springBootApi.notification.add(
-                    `Client: ${result.customer.nom} ${result.customer.prenom}`,
-                    { type: 'success' }
-                );
-
-                // Vider champ
+                    </div>`;
+                this.springBootApi.notification.add(`Client: ${result.customer.nom} ${result.customer.prenom}`, { type: 'success' });
                 badgeInput.value = '';
-
             } else {
-                // Échec - garder client précédent
                 this.updateStatus(`❌ ${result.error}`, '#dc3545');
-                
-                this.springBootApi.notification.add(
-                    `Badge invalide: ${result.error}`,
-                    { type: 'warning' }
-                );
+                this.springBootApi.notification.add(`Badge invalide: ${result.error}`, { type: 'warning' });
             }
-
-            // Focus pour prochain scan
             setTimeout(() => badgeInput.focus(), 1000);
-
-        } catch (error) {
-            console.error('❌ Erreur validation:', error);
+        } catch {
             this.updateStatus('❌ Erreur connexion', '#dc3545');
         }
     }
 
     updateStatus(message, color = '#6c757d') {
         const statusDiv = document.getElementById('badge-status');
-        if (statusDiv) {
-            statusDiv.textContent = message;
-            statusDiv.style.color = color;
-        }
+        if (statusDiv) { statusDiv.textContent = message; statusDiv.style.color = color; }
     }
 }
 
-/**
- * ✅ Service principal - VERSION SIMPLIFIÉE
- */
+/* ----------------------------------------------------------
+ * ✅ Service principal Spring Boot
+ * ---------------------------------------------------------- */
 class SpringBootApiService {
     constructor(env) {
         this.env = env;
         this.orm = env.services.orm;
         this.dialog = env.services.dialog;
         this.notification = env.services.notification;
-        
+
         this.authService = new CashierAuthService(env);
         this.badgeService = new BadgeService(env, this.authService);
         this.badgeInterface = null;
+
+        this.loginPopup = null; // pour le popup pro
+    }
+
+    showProfessionalLogin(onSuccess) {
+        if (!this.loginPopup) this.loginPopup = new ProfessionalLoginPopup(this);
+        this.loginPopup.show(onSuccess);
     }
 
     initializeInterface() {
-        console.log('🎨 Initialisation interface...');
         this.badgeInterface = new SimpleBadgeInterface(this);
         this.badgeInterface.create();
     }
 
-    isAuthenticated() {
-        return this.authService.isAuthenticated && this.authService.isTokenValid();
-    }
+    isAuthenticated() { return this.authService.isAuthenticated && this.authService.isTokenValid(); }
 
-    // ============= VOS MÉTHODES EXISTANTES COMPLÈTES =============
-    
     prepareOrderData(order) {
         try {
-            // ✅ CORRECTION : Utiliser l'email du badge scanné pour les subventions
             let customerEmail = 'unknown@pos.com';
-            
-            // Priorité 1 : Email du badge scanné (pour les subventions)
             if (this.badgeInterface && this.badgeInterface.currentCustomer) {
                 customerEmail = this.badgeInterface.currentCustomer.email || 'unknown@pos.com';
-                console.log('✅ Utilisation email badge pour subventions:', customerEmail);
             } else {
-                // Priorité 2 : Client Odoo standard
                 const customer = order.get_partner();
                 customerEmail = customer ? (customer.email || 'unknown@pos.com') : 'unknown@pos.com';
-                console.log('⚠️ Utilisation email Odoo standard:', customerEmail);
             }
-            
-            const orderData = {
-                order_id: order.name || order.uid,
-                customer_email: customerEmail,
-                lines: []
-            };
-
+            const orderData = { order_id: order.name || order.uid, customer_email: customerEmail, lines: [] };
             const lines = order.orderlines || order.lines || order.get_orderlines() || [];
-            
-            if (!lines || lines.length === 0) {
-                throw new Error('No order lines found');
-            }
+            if (!lines || lines.length === 0) throw new Error('No order lines found');
 
             for (const line of lines) {
                 const product = line.product || line.product_id;
                 const quantity = line.quantity || line.qty || 1;
-                
                 if (product && quantity > 0) {
                     const productId = typeof product === 'object' ? product.id : product;
-                    orderData.lines.push({
-                        product_id: productId,
-                        qty: quantity
-                    });
+                    orderData.lines.push({ product_id: productId, qty: quantity });
                 }
             }
-
-            if (orderData.lines.length === 0) {
-                throw new Error('No valid order lines processed');
-            }
-
-            console.log('📤 Données envoyées à Spring Boot:', orderData);
+            if (orderData.lines.length === 0) throw new Error('No valid order lines processed');
             return orderData;
-
         } catch (error) {
-            console.error('Erreur préparation:', error);
             throw new Error(_t('Failed to prepare order data: ') + error.message);
         }
     }
 
     async validateOrder(order, connectorId = null) {
         try {
-            if (!this.isAuthenticated()) {
-                throw new Error('Session expirée');
-            }
-
+            if (!this.isAuthenticated()) throw new Error('Session expirée');
             const orderData = this.prepareOrderData(order);
-            
+
             let connector = connectorId;
             if (!connector) {
-                const connectors = await this.orm.searchRead(
-                    'payment.connector',
-                    [['is_active', '=', true]],
-                    ['id'],
-                    { limit: 1 }
-                );
-                
-                if (connectors.length === 0) {
-                    throw new Error(_t('No active payment connector found'));
-                }
-                
+                const connectors = await this.orm.searchRead('payment.connector', [['is_active', '=', true]], ['id'], { limit: 1 });
+                if (connectors.length === 0) throw new Error(_t('No active payment connector found'));
                 connector = connectors[0].id;
             }
 
-            const result = await this.orm.call(
-                'payment.connector',
-                'validate_payment',
-                [connector, orderData]
-            );
-
+            const result = await this.orm.call('payment.connector','validate_payment',[connector, orderData]);
             return result;
-
         } catch (error) {
-            console.error('Erreur validation:', error);
-            return {
-                success: false,
-                error: error.message || _t('Validation failed'),
-                error_type: 'client_error'
-            };
+            return { success: false, error: error.message || _t('Validation failed'), error_type: 'client_error' };
         }
     }
 
-    /**
-     * ✅ CORRIGÉ : Afficher la pop-up avec les données du badge scanné
-     */
     showSuccessPopup(springResponse) {
-        console.log('🔍 DEBUG - Données Spring Boot reçues:', springResponse);
-        
         const data = springResponse.spring_response || springResponse.data || springResponse;
-        console.log('🔍 DEBUG - Data extraite:', data);
-        
         const numeroTicket = this.generateTicketNumber();
         const date = new Date().toLocaleDateString('fr-FR');
         const heureTransaction = new Date().toLocaleTimeString('fr-FR');
@@ -748,43 +695,25 @@ class SpringBootApiService {
         const partSalariale = data.partSalariale || 0;
         const partPatronale = data.partPatronale || 0;
 
-        // ✅ CORRECTION : Utiliser les données du badge scanné au lieu du serveur
         let utilisateurNomComplet = 'Client non identifié';
         let utilisateurEmail = '';
-        let utilisateurCategorie = '';
-
         if (this.badgeInterface && this.badgeInterface.currentCustomer) {
             const customer = this.badgeInterface.currentCustomer;
             utilisateurNomComplet = `${customer.nom} ${customer.prenom}`;
             utilisateurEmail = customer.email || '';
-            
-            if (customer.role && customer.role !== 'EMPLOYE') {
-                utilisateurCategorie = customer.role;
-                utilisateurNomComplet += ` - ${customer.role}`;
-            }
-            
-            console.log('✅ Utilisation données badge scanné:', { utilisateurNomComplet, utilisateurEmail, utilisateurCategorie });
+            if (customer.role && customer.role !== 'EMPLOYE') utilisateurNomComplet += ` - ${customer.role}`;
         } else {
-            // Fallback vers les données serveur si pas de badge
             utilisateurNomComplet = data.utilisateurNomComplet || 'Client non identifié';
             utilisateurEmail = data.utilisateurEmail || '';
-            utilisateurCategorie = data.utilisateurCategorie || '';
-            
-            console.log('⚠️ Fallback données serveur:', { utilisateurNomComplet, utilisateurEmail, utilisateurCategorie });
         }
 
         const articles = data.articles || [];
-        console.log('🔍 DEBUG - Articles extraits:', articles);
-
         let message = `🎉 TRANSACTION RÉUSSIE
 
 👤 Client: ${utilisateurNomComplet}`;
-
         if (utilisateurEmail && utilisateurEmail.trim() !== '') {
-            message += `
-📧 Email: ${utilisateurEmail}`;
+            message += `\n📧 Email: ${utilisateurEmail}`;
         }
-
         message += `
 
 📋 Détails:
@@ -809,8 +738,7 @@ class SpringBootApiService {
   Subvention: ${subvention.toFixed(2)}€ | Votre part: ${partClient.toFixed(2)}€`;
             });
         } else {
-            message += `
-• Aucun détail d'article disponible`;
+            message += `\n• Aucun détail d'article disponible`;
         }
 
         message += `
@@ -821,77 +749,47 @@ class SpringBootApiService {
 • Votre part: ${partSalariale.toFixed(2)}€
 
 ✅ Montant déduit de votre badge avec succès`;
+        if (partPatronale > 0) message += `\n🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !`;
 
-        if (partPatronale > 0) {
-            message += `
-🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !`;
-        }
-
-        // ✅ POPUP AVEC BOUTON IMPRIMER
         this.dialog.add(ConfirmationDialog, {
             title: _t('✅ Paiement Validé avec Succès'),
             body: message,
             confirmLabel: _t('🖨️ Imprimer'),
             cancelLabel: _t('Fermer'),
-            confirm: () => {
-                console.log('🖨️ Bouton Imprimer cliqué');
-                this.printTicket(data, numeroTicket, date, heureTransaction);
-            },
-            cancel: () => {
-                console.log('Pop-up de succès fermée');
-            }
+            confirm: () => { this.printTicket(data, numeroTicket, date, heureTransaction); },
         });
 
-        // Notification de succès avec bon nom
         this.notification.add(
-            _t('Paiement validé pour ') + utilisateurNomComplet.split(' - ')[0] + 
+            _t('Paiement validé pour ') + utilisateurNomComplet.split(' - ')[0] +
             _t(' - ') + articles.length + _t(' article(s) - Subvention: ') + partPatronale.toFixed(2) + '€',
-            {
-                type: 'success',
-                sticky: false
-            }
+            { type: 'success', sticky: false }
         );
     }
 
-    /**
-     * ✅ REMIS : Fonction d'impression du ticket
-     */
     printTicket(springData, numeroTicket, date, heureTransaction) {
-        console.log('🖨️ Impression ticket démarrée');
-        
         const ticketContent = this.generateTicketContent(springData, numeroTicket, date, heureTransaction);
-        
         const printWindow = window.open('', 'TicketPrint', 'width=400,height=600');
         printWindow.document.write(ticketContent);
         printWindow.document.close();
-        
         printWindow.focus();
         printWindow.print();
-        
-        console.log("✅ Ticket envoyé à l'imprimante");
     }
 
-    /**
-     * ✅ CORRIGÉ : Utiliser les données du badge dans le ticket
-     */
     generateTicketContent(data, numeroTicket, date, heureTransaction) {
         const articles = data.articles || [];
         const montantTotal = data.montantTotal || 0;
         const partSalariale = data.partSalariale || 0;
         const partPatronale = data.partPatronale || 0;
-        
-        // ✅ CORRECTION : Utiliser les données du client badge
+
         let utilisateurNomComplet = 'Client';
         if (this.badgeInterface && this.badgeInterface.currentCustomer) {
             const customer = this.badgeInterface.currentCustomer;
             utilisateurNomComplet = `${customer.nom} ${customer.prenom}`;
-            if (customer.role && customer.role !== 'EMPLOYE') {
-                utilisateurNomComplet += ` - ${customer.role}`;
-            }
+            if (customer.role && customer.role !== 'EMPLOYE') utilisateurNomComplet += ` - ${customer.role}`;
         } else if (data.utilisateurNomComplet) {
             utilisateurNomComplet = data.utilisateurNomComplet;
         }
-        
+
         let articlesHtml = '';
         articles.forEach(article => {
             const nom = article.nom || 'Article';
@@ -900,117 +798,48 @@ class SpringBootApiService {
             const montantArticle = article.montantTotal || 0;
             const subvention = article.subventionTotale || 0;
             const partClient = article.partSalariale || 0;
-            
             articlesHtml += `
             <tr>
-                <td style="text-align: left;">${nom} x${quantite}</td>
-                <td style="text-align: right;">${montantArticle.toFixed(2)}€</td>
+                <td style="text-align:left;">${nom} x${quantite}</td>
+                <td style="text-align:right;">${montantArticle.toFixed(2)}€</td>
             </tr>
             <tr>
-                <td style="text-align: right; font-size: 10px; color: #666;">
+                <td style="text-align:right;font-size:10px;color:#666;">
                     Prix: ${prixUnitaire.toFixed(2)}€ | Subv: ${subvention.toFixed(2)}€
                 </td>
-                <td style="text-align: right; font-size: 10px; color: #666;">
+                <td style="text-align:right;font-size:10px;color:#666;">
                     Votre part: ${partClient.toFixed(2)}€
                 </td>
-            </tr>
-            `;
+            </tr>`;
         });
-        
+
         return `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Ticket Cantine</title>
-            <style>
-                body { 
-                    font-family: 'Courier New', monospace; 
-                    font-size: 12px; 
-                    margin: 0; 
-                    padding: 10px;
-                    width: 300px;
-                }
-                .center { text-align: center; }
-                .right { text-align: right; }
-                .bold { font-weight: bold; }
-                .separator { 
-                    border-top: 1px dashed #333; 
-                    margin: 8px 0; 
-                }
-                table { 
-                    width: 100%; 
-                    border-collapse: collapse; 
-                }
-                td { 
-                    padding: 2px 0; 
-                    vertical-align: top; 
-                }
-                .total-line { 
-                    border-top: 1px solid #333; 
-                    font-weight: bold; 
-                }
-            </style>
-        </head>
-        <body>
-            <div class="center bold">
-                ================================<br>
-                CANTINE ENTREPRISE<br>
-                ================================
-            </div>
-            
+        <!DOCTYPE html><html><head><meta charset="utf-8"><title>Ticket Cantine</title>
+        <style>
+            body { font-family: 'Courier New', monospace; font-size:12px; margin:0; padding:10px; width:300px; }
+            .center { text-align:center; } .right { text-align:right; } .bold { font-weight:bold; }
+            .separator { border-top:1px dashed #333; margin:8px 0; }
+            table { width:100%; border-collapse:collapse; } td { padding:2px 0; vertical-align:top; }
+            .total-line { border-top:1px solid #333; font-weight:bold; }
+        </style></head><body>
+            <div class="center bold">===============================<br>CANTINE ENTREPRISE<br>===============================</div>
             <div class="separator"></div>
-            
-            <div>
-                <strong>Ticket:</strong> ${numeroTicket}<br>
-                <strong>Date:</strong> ${date}<br>
-                <strong>Heure:</strong> ${heureTransaction}<br>
-                <strong>Client:</strong> ${utilisateurNomComplet}
-            </div>
-            
+            <div><strong>Ticket:</strong> ${numeroTicket}<br><strong>Date:</strong> ${date}<br><strong>Heure:</strong> ${heureTransaction}<br><strong>Client:</strong> ${utilisateurNomComplet}</div>
             <div class="separator"></div>
-            
             <div class="bold">ARTICLES:</div>
-            <table>
-                ${articlesHtml}
-            </table>
-            
+            <table>${articlesHtml}</table>
             <div class="separator"></div>
-            
             <table>
-                <tr>
-                    <td>Sous-total:</td>
-                    <td class="right">${montantTotal.toFixed(2)}€</td>
-                </tr>
-                <tr>
-                    <td>Subvention entreprise:</td>
-                    <td class="right">-${partPatronale.toFixed(2)}€</td>
-                </tr>
-                <tr class="total-line">
-                    <td><strong>À PAYER:</strong></td>
-                    <td class="right"><strong>${partSalariale.toFixed(2)}€</strong></td>
-                </tr>
+                <tr><td>Sous-total:</td><td class="right">${montantTotal.toFixed(2)}€</td></tr>
+                <tr><td>Subvention entreprise:</td><td class="right">-${partPatronale.toFixed(2)}€</td></tr>
+                <tr class="total-line"><td><strong>À PAYER:</strong></td><td class="right"><strong>${partSalariale.toFixed(2)}€</strong></td></tr>
             </table>
-            
             <div class="separator"></div>
-            
-            <div class="center">
-                ✅ Montant débité de votre badge<br>
-                ${partPatronale > 0 ? `🎯 Économie: ${partPatronale.toFixed(2)}€` : ''}<br><br>
-                Merci et bon appétit !
-            </div>
-            
-            <div class="center">
-                ================================
-            </div>
-        </body>
-        </html>
-        `;
+            <div class="center">✅ Montant débité de votre badge<br>${partPatronale > 0 ? `🎯 Économie: ${partPatronale.toFixed(2)}€` : ''}<br><br>Merci et bon appétit !</div>
+            <div class="center">===============================</div>
+        </body></html>`;
     }
 
-    /**
-     * ✅ REMIS : Générer un numéro de ticket unique
-     */
     generateTicketNumber() {
         const timestamp = Date.now().toString();
         const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
@@ -1019,224 +848,75 @@ class SpringBootApiService {
 
     showError(errorMessage, errorType = 'error', springResponse = null) {
         const title = this.getErrorTitle(errorType, springResponse);
-        
         let fullMessage = errorMessage;
         if (springResponse) {
             if (springResponse.required_amount && springResponse.current_balance) {
-                fullMessage += `\n\nDétails:\n`;
-                fullMessage += `• Montant requis: ${springResponse.required_amount}€\n`;
-                fullMessage += `• Solde actuel: ${springResponse.current_balance}€`;
+                fullMessage += `\n\nDétails:\n• Montant requis: ${springResponse.required_amount}€\n• Solde actuel: ${springResponse.current_balance}€`;
             }
-            if (springResponse.transactionId) {
-                fullMessage += `\n• Transaction ID: ${springResponse.transactionId}`;
-            }
+            if (springResponse.transactionId) fullMessage += `\n• Transaction ID: ${springResponse.transactionId}`;
         }
-        
-        this.dialog.add(AlertDialog, {
-            title: title,
-            body: fullMessage,
-            confirmLabel: _t('OK'),
-        });
-
+        this.dialog.add(AlertDialog, { title, body: fullMessage, confirmLabel: _t('OK') });
         const notifType = errorType === 'validation_error' ? 'warning' : 'danger';
-        this.notification.add(errorMessage, {
-            type: notifType,
-            sticky: false
-        });
+        this.notification.add(errorMessage, { type: notifType, sticky: false });
     }
 
     getErrorTitle(errorType, springResponse = null) {
         if (springResponse && springResponse.message) {
-            if (springResponse.message.includes('Solde insuffisant')) {
-                return _t('Insufficient Balance');
-            }
-            if (springResponse.message.includes('Product not found')) {
-                return _t('Product Not Found');
-            }
+            if (springResponse.message.includes('Solde insuffisant')) return _t('Insufficient Balance');
+            if (springResponse.message.includes('Product not found')) return _t('Product Not Found');
         }
-
         const titles = {
-            'timeout': _t('Connection Timeout'),
-            'connection': _t('Connection Error'),
-            'client_error': _t('Validation Error'),
-            'server_error': _t('Server Error'),
-            'validation_error': _t('Payment Validation Failed'),
-            'insufficient_funds': _t('Insufficient Funds'),
-            'invalid_product': _t('Invalid Product'),
-            'processing_error': _t('Processing Error'),
-            'unexpected': _t('Unexpected Error')
+            'timeout': _t('Connection Timeout'), 'connection': _t('Connection Error'),
+            'client_error': _t('Validation Error'), 'server_error': _t('Server Error'),
+            'validation_error': _t('Payment Validation Failed'), 'insufficient_funds': _t('Insufficient Funds'),
+            'invalid_product': _t('Invalid Product'), 'processing_error': _t('Processing Error'), 'unexpected': _t('Unexpected Error')
         };
-
         return titles[errorType] || _t('Error');
     }
 
-    /**
-     * ✅ MODIFIÉ : Afficher le succès avec pop-up détaillée
-     */
     showSuccess(message, springResponse = null) {
-        if (springResponse) {
-            // ✅ POPUP DÉTAILLÉE avec bouton imprimer
-            this.showSuccessPopup(springResponse);
-        } else {
-            // Fallback simple
-            this.notification.add(message || _t('Validation successful'), {
-                type: 'success'
-            });
-        }
+        if (springResponse) this.showSuccessPopup(springResponse);
+        else this.notification.add(message || _t('Validation successful'), { type: 'success' });
     }
 }
 
-/**
- * ✅ PATCH PRINCIPAL - VERSION SIMPLIFIÉE
- */
+/* ----------------------------------------------------------
+ * ✅ PATCH ProductScreen
+ * ---------------------------------------------------------- */
 patch(ProductScreen.prototype, {
     setup() {
         super.setup();
-        console.log('🚀 Setup ProductScreen...');
-        
         this.springBootApi = new SpringBootApiService(this.env);
-        
-        // Vérification auth asynchrone
         this.checkAuthenticationAsync();
     },
 
     async checkAuthenticationAsync() {
-        console.log('🔍 Vérification authentification POS...');
-        
         const hasValidAuth = await this.springBootApi.authService.loadStoredAuth();
-        
         if (!hasValidAuth) {
-            console.log('❌ Authentification requise');
-            this.showSimpleLoginDialog();
+            // ➜ Utilise le popup moderne
+            this.springBootApi.showProfessionalLogin((result) => {
+                this.springBootApi.notification.add(
+                    `Bienvenue ${result.cashier.nom} ${result.cashier.prenom}`, { type: 'success' }
+                );
+                setTimeout(() => { this.initializePOSInterface(); }, 500);
+            });
             return;
         }
-        
-        console.log('✅ Authentification valide');
         this.initializePOSInterface();
     },
 
     initializePOSInterface() {
-        console.log('🎨 Initialisation interface POS...');
-        
-        // Interface badge
         this.springBootApi.initializeInterface();
-        
-        // Autres éléments
         this.createSpringBootButton();
         this.hidePaymentButton();
-        
-        // Message bienvenue
+
         const cashier = this.springBootApi.authService.getCurrentCashier();
         if (cashier) {
-            this.springBootApi.notification.add(
-                `Session POS: ${cashier.nom} ${cashier.prenom}`,
-                { type: 'success' }
-            );
+            this.springBootApi.notification.add(`Session POS: ${cashier.nom} ${cashier.prenom}`, { type: 'success' });
         }
     },
 
-    /**
-     * ✅ LOGIN SIMPLIFIÉ - Texte simple seulement
-     */
-    showSimpleLoginDialog() {
-        // Créer inputs temporaires
-        let emailInput, passwordInput;
-        
-        this.springBootApi.dialog.add(ConfirmationDialog, {
-            title: _t('Authentification Caissier'),
-            body: _t('Connexion requise pour accéder au Point de Vente.\n\nRôles autorisés: ADMIN, SUPER_ADMIN, CAISSIER\n\nVeuillez saisir vos identifiants:'),
-            confirmLabel: _t('Se connecter'),
-            cancelLabel: _t('Annuler'),
-            confirm: () => this.showInputDialog(),
-            cancel: () => {
-                window.location.href = '/web';
-            }
-        });
-    },
-
-    showInputDialog() {
-        // Créer une div temporaire pour les inputs
-        const inputContainer = document.createElement('div');
-        inputContainer.innerHTML = `
-            <div style="padding: 20px;">
-                <div style="margin-bottom: 15px;">
-                    <label>Email:</label>
-                    <input type="email" id="temp-email" style="width: 100%; padding: 8px; margin-top: 5px;" placeholder="aymane@gmail.com">
-                </div>
-                <div style="margin-bottom: 15px;">
-                    <label>Mot de passe:</label>
-                    <input type="password" id="temp-password" style="width: 100%; padding: 8px; margin-top: 5px;">
-                </div>
-            </div>
-        `;
-        
-        document.body.appendChild(inputContainer);
-        
-        this.springBootApi.dialog.add(ConfirmationDialog, {
-            title: _t('Identifiants'),
-            body: _t('Veuillez remplir les champs ci-dessus et cliquer sur Valider'),
-            confirmLabel: _t('Valider'),
-            cancelLabel: _t('Annuler'),
-            confirm: () => {
-                const email = document.getElementById('temp-email')?.value;
-                const password = document.getElementById('temp-password')?.value;
-                document.body.removeChild(inputContainer);
-                this.processSimpleLogin(email, password);
-            },
-            cancel: () => {
-                document.body.removeChild(inputContainer);
-                window.location.href = '/web';
-            }
-        });
-        
-        // Focus sur email
-        setTimeout(() => {
-            document.getElementById('temp-email')?.focus();
-        }, 100);
-    },
-
-    async processSimpleLogin(email, password) {
-        if (!email || !password) {
-            this.springBootApi.notification.add('Champs requis', { type: 'warning' });
-            this.showInputDialog();
-            return;
-        }
-
-        try {
-            this.springBootApi.notification.add('Connexion...', { type: 'info' });
-
-            const result = await this.springBootApi.authService.authenticateCashier(email, password);
-
-            if (result.success) {
-                this.springBootApi.notification.add(
-                    `Bienvenue ${result.cashier.nom}`, 
-                    { type: 'success' }
-                );
-                
-                setTimeout(() => {
-                    this.initializePOSInterface();
-                }, 500);
-
-            } else {
-                this.springBootApi.notification.add(result.error, { type: 'danger' });
-                setTimeout(() => {
-                    this.showSimpleLoginDialog();
-                }, 1500);
-            }
-
-        } catch (error) {
-            console.error('Erreur login:', error);
-            this.springBootApi.notification.add('Erreur connexion', { type: 'danger' });
-        }
-    },
-
-    /**
-     * ✅ MASQUAGE PAYMENT - Version robuste
-     */
     hidePaymentButton() {
-        console.log('🎯 Masquage Payment...');
-        
-        // CSS global
         const style = document.createElement('style');
         style.textContent = `
             .actionpad .validation .btn-primary:last-child,
@@ -1244,27 +924,12 @@ patch(ProductScreen.prototype, {
             .pos-actionpad .payment-button,
             .control-buttons .payment,
             [data-bs-original-title="Payment"],
-            .payment-screen-button {
-                display: none !important;
-            }
+            .payment-screen-button { display: none !important; }
         `;
         document.head.appendChild(style);
-        
-        // Masquage direct
         setTimeout(() => {
-            const selectors = [
-                '.actionpad .validation .btn-primary:last-child',
-                '.payment-button',
-                '[data-bs-original-title="Payment"]'
-            ];
-            
-            selectors.forEach(selector => {
-                const btn = document.querySelector(selector);
-                if (btn) {
-                    btn.style.display = 'none';
-                    console.log('✅ Payment masqué:', selector);
-                }
-            });
+            ['.actionpad .validation .btn-primary:last-child','.payment-button','[data-bs-original-title="Payment"]']
+                .forEach(sel => { const btn = document.querySelector(sel); if (btn) btn.style.display = 'none'; });
         }, 1000);
     },
 
@@ -1275,105 +940,59 @@ patch(ProductScreen.prototype, {
                 const springButton = document.createElement('div');
                 springButton.className = 'control-button spring-validate-btn';
                 springButton.innerHTML = `
-                    <i class="fa fa-server" style="color: #28a745; font-size: 18px;"></i>
-                    <br/>
-                    <span style="font-size: 11px; font-weight: bold;">SPRING<br/>VALIDATE</span>
-                `;
+                    <i class="fa fa-server" style="font-size:18px;"></i><br/>
+                    <span style="font-size:11px;font-weight:bold;">SPRING<br/>VALIDATE</span>`;
                 springButton.addEventListener('click', () => this.validateWithSpringBoot());
                 controlButtons.appendChild(springButton);
-                console.log('✅ Bouton Spring Boot ajouté');
             }
         }, 1000);
     },
 
     async validateWithSpringBoot() {
-        console.log('🚀 Validation Spring Boot...');
-        
         const order = this.pos.get_order();
-        
-        if (!order) {
-            this.springBootApi.showError(_t('Commande non trouvée'));
-            return;
-        }
-
+        if (!order) { this.springBootApi.showError(_t('Commande non trouvée')); return; }
         const lines = order.orderlines || order.lines || order.get_orderlines() || [];
-        
-        if (!lines || lines.length === 0) {
-            this.springBootApi.showError(_t('Panier vide - Ajoutez des articles'));
-            return;
-        }
+        if (!lines || lines.length === 0) { this.springBootApi.showError(_t('Panier vide - Ajoutez des articles')); return; }
 
-        // Utiliser le client du badge si disponible
         const customer = order.badge_customer || order.get_partner();
-        
-        if (!customer) {
-            const confirmed = confirm(_t('Aucun client sélectionné. Continuer ?'));
-            if (!confirmed) return;
-        }
+        if (!customer) { const confirmed = confirm(_t('Aucun client sélectionné. Continuer ?')); if (!confirmed) return; }
 
         try {
             this.springBootApi.notification.add('Validation en cours...', { type: 'info' });
-
             const result = await this.springBootApi.validateOrder(order);
-
-            if (result.success) {
-                this.springBootApi.showSuccess('Transaction réussie', result);
-            } else {
-                this.springBootApi.showError(result.error, result.error_type);
-            }
-
+            if (result.success) this.springBootApi.showSuccess('Transaction réussie', result);
+            else this.springBootApi.showError(result.error, result.error_type);
         } catch (error) {
-            console.error('Erreur validation:', error);
             this.springBootApi.showError('Erreur: ' + error.message);
         }
     }
 });
 
-/**
- * ✅ PATCH PAYMENT SCREEN - Simplifié
- */
+/* ----------------------------------------------------------
+ * ✅ PATCH PaymentScreen
+ * ---------------------------------------------------------- */
 patch(PaymentScreen.prototype, {
-    setup() {
-        super.setup();
-        this.springBootApi = new SpringBootApiService(this.env);
-    }
+    setup() { super.setup(); this.springBootApi = new SpringBootApiService(this.env); }
 });
 
-/**
- * ✅ COMPOSANT BOUTON - Simplifié
- */
+/* ----------------------------------------------------------
+ * ✅ Composant bouton (optionnel)
+ * ---------------------------------------------------------- */
 export class SpringBootValidateButton extends Component {
     static template = "pos_spring_connector.SpringBootValidateButton";
-    
-    setup() {
-        this.springBootApi = new SpringBootApiService(this.env);
-        this.pos = useService("pos");
-    }
-
+    setup() { this.springBootApi = new SpringBootApiService(this.env); this.pos = useService("pos"); }
     async onClick() {
         const order = this.pos.get_order();
-        
-        if (!order || order.orderlines.length === 0) {
-            this.springBootApi.showError(_t('Panier vide'));
-            return;
-        }
-
+        if (!order || order.orderlines.length === 0) { this.springBootApi.showError(_t('Panier vide')); return; }
         try {
             this.springBootApi.notification.add('Validation...', { type: 'info' });
-
             const result = await this.springBootApi.validateOrder(order);
-            
-            if (result.success) {
-                this.springBootApi.showSuccess('Validé', result);
-            } else {
-                this.springBootApi.showError(result.error);
-            }
-
-        } catch (error) {
-            console.error('Erreur:', error);
+            if (result.success) this.springBootApi.showSuccess('Validé', result);
+            else this.springBootApi.showError(result.error);
+        } catch {
             this.springBootApi.showError('Erreur validation');
         }
     }
 }
 
-export { SpringBootApiService, CashierAuthService, BadgeService, SimpleBadgeInterface };
+export { SpringBootApiService, CashierAuthService, BadgeService, SimpleBadgeInterface, ProfessionalLoginPopup };
