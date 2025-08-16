@@ -793,12 +793,14 @@ class SpringBootApiService {
 ✅ Montant déduit de votre badge avec succès`;
         if (partPatronale > 0) message += `\n🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !`;
 
-        this.dialog.add(ConfirmationDialog, {
+        // ✅ NOUVEAU : Impression automatique AVANT le popup
+        this.printTicket(data, numeroTicket, date, heureTransaction);
+
+        // ✅ POPUP SIMPLIFIÉ sans bouton imprimer
+        this.dialog.add(AlertDialog, {
             title: _t('✅ Paiement Validé avec Succès'),
-            body: message,
-            confirmLabel: _t('🖨️ Imprimer'),
-            cancelLabel: _t('Fermer'),
-            confirm: () => { this.printTicket(data, numeroTicket, date, heureTransaction); },
+            body: message + '\n\n🖨️ Ticket imprimé automatiquement',
+            confirmLabel: _t('OK')
         });
 
         this.notification.add(
