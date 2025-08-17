@@ -418,15 +418,110 @@ class CashierAuthService {
         this.isAuthenticated = false;
         this.tokenExpiration = null;
     }
+    // Authentification offline avec PIN
+    async authenticateOfflineWithPIN(email, pin) {
+        const storedData = localStorage.getItem(`offline_pin_${email}`);
+        
+        if (!storedData) {
+            return {
+                success: false, 
+                error: "PIN offline non configuré.\nConnexion internet requise pour première utilisation."
+            };
+        }
+        
+        const data = JSON.parse(storedData);
+        
+        if (data.pin !== pin) {
+            return { success: false, error: "PIN incorrect" };
+        }
+        
+        // Simuler structure de réponse comme online
+        this.currentCashier = {
+            email: data.email,
+            nom: data.nom || "Caissier",
+            prenom: data.prenom || "Offline", 
+            role: data.role
+        };
+        this.isAuthenticated = true;
+        
+        console.log('✅ Authentification offline réussie');
+        return { 
+            success: true, 
+            cashier: this.currentCashier, 
+            mode: "offline",
+            token: "offline_session" 
+        };
+    }
+
+//  Proposer setup PIN après connexion online
+    promptPINSetup(email, jwt) {
+    // Vérifier si PIN déjà configuré
+    if (localStorage.getItem(`offline_pin_${email}`)) {
+        console.log('PIN offline déjà configuré pour', email);
+        return;
+    }
+    
+    // Afficher popup simple avec prompt (temporaire)
+    const pin = prompt("Configurez votre PIN offline (4 chiffres):\n\nCe PIN vous permettra d'utiliser le POS sans internet.", "");
+    
+    if (!pin) {
+        console.log('Configuration PIN ignorée');
+        return;
+    }
+    
+    if (!/^\d{4}$/.test(pin)) {
+        alert("PIN invalide. Doit être 4 chiffres.");
+        return;
+    }
+    
+    // Sauver PIN
+    const pinData = {
+        email: email,
+        pin: pin,
+        setupDate: new Date().toLocaleString(),
+        nom: this.currentCashier.nom,
+        prenom: this.currentCashier.prenom,
+        role: this.currentCashier.role
+    };
+    
+    localStorage.setItem(`offline_pin_${email}`, JSON.stringify(pinData));
+    console.log('✅ PIN offline configuré:', pin);
+    alert("PIN offline configuré avec succès !\nVous pourrez vous connecter sans internet avec ce PIN.");
+    }
 
     async authenticateCashier(email, password) {
+        console.log('🔍 Test connexion direct...');
+    
+        let isOnline = false;
+        try {
+            const response = await fetch('http://localhost:8080/api/health', { timeout: 1000 });
+            isOnline = true;
+            console.log('✅ Connexion directe OK');
+        } catch {
+            console.log('❌ Connexion directe KO');
+            isOnline = false;
+        }
+        console.log('DEBUG: isOnline =', isOnline, typeof isOnline);
+
+        
+        if (isOnline === false) {
+            console.log('🔴 Mode OFFLINE - Authentification via PIN');
+            return await this.authenticateOfflineWithPIN(email, password);
+        }
+        
+        console.log('🟢 Mode ONLINE - Authentification Spring Boot');
         try {
             const headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
             const loginResponse = await fetch('http://localhost:8080/api/auth/login', {
                 method: 'POST', headers, body: JSON.stringify({ email, password }), mode: 'cors', credentials: 'omit'
             });
+            
+
             const loginResult = await loginResponse.json();
             if (!loginResponse.ok || loginResult.status !== 200) throw new Error(loginResult.message || 'Authentification échouée');
+        
+            
+
             const tempJWT = loginResult.token;
 
             const accountResponse = await fetch('http://localhost:8080/api/utilisateurs/account', {
@@ -461,15 +556,76 @@ class CashierAuthService {
                 detail: { cashier: this.currentCashier }
             });
             document.dispatchEvent(event);
-        }, 100);
+            }, 100);
+            this.promptPINSetup(email, loginResult.token);//Après succès online, proposer setup PIN
+            const pinSetupResult = await this.ensurePINSetup(email, tempJWT);
+    
+            if (!pinSetupResult.success) {
+                // PIN setup échoué → FERMER session
+                this.logout();
+                return { success: false, error: pinSetupResult.error };
+            }
 
-        console.log('🎉 ÉTAPE 4/4 : Authentification complète réussie');
+            console.log('🎉  Authentification complète réussie');
 
             return { success: true, cashier: this.currentCashier, token: this.jwtToken };
         } catch (error) {
+            console.error('❌ Erreur authentification ONLINE:', error.message);
             return { success: false, error: error.message };
         }
     }
+    // ✅ NOUVEAU : Setup PIN OBLIGATOIRE
+async ensurePINSetup(email, jwt) {
+    // Vérifier si PIN déjà configuré
+    if (localStorage.getItem(`offline_pin_${email}`)) {
+        console.log('✅ PIN offline déjà configuré');
+        return { success: true };
+    }
+    
+    console.log('🔐 Configuration PIN offline OBLIGATOIRE');
+    
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts) {
+        const pin = prompt(`Configuration PIN offline OBLIGATOIRE (Tentative ${attempts + 1}/${maxAttempts})\n\nEntrez 4 chiffres pour mode offline:`, "");
+        
+        // Utilisateur annule
+        if (pin === null) {
+            return { 
+                success: false, 
+                error: "Configuration PIN obligatoire annulée. Session fermée pour sécurité." 
+            };
+        }
+        
+        // Validation PIN
+        if (!/^\d{4}$/.test(pin)) {
+            attempts++;
+            alert(`PIN invalide (${attempts}/${maxAttempts}). Doit être 4 chiffres exactement.`);
+            continue;
+        }
+        
+        // PIN valide → Sauver
+        const pinData = {
+            email: email,
+            pin: pin,
+            setupDate: new Date().toLocaleString(),
+            nom: this.currentCashier.nom,
+            prenom: this.currentCashier.prenom,
+            role: this.currentCashier.role
+        };
+        
+        localStorage.setItem(`offline_pin_${email}`, JSON.stringify(pinData));
+        console.log('✅ PIN offline configuré avec succès');
+        return { success: true };
+    }
+    
+    // Trop de tentatives
+    return { 
+        success: false, 
+        error: `Trop de tentatives invalides (${maxAttempts}). Session fermée pour sécurité.` 
+    };
+}
 
     async verifyExistingToken() {
         try {
@@ -546,6 +702,129 @@ class BadgeService {
         } catch (error) { return { success: false, error: error.message }; }
     }
 }
+class CashierCacheService {
+    constructor(env, authService) {
+        this.env = env;
+        this.authService = authService;
+        this.CACHE_KEY = 'pos_cashiers_cache';
+        this.CACHE_EXPIRY_HOURS = 24; // 24h de validité
+    }
+
+    // Récupérer et cacher tous les caissiers
+    async fetchAndCacheCashiers() {
+        try {
+            const jwt = this.authService.getJWTToken();
+            if (!jwt) throw new Error('Pas de token JWT');
+
+            console.log('🔄 Récupération des caissiers...');
+            const response = await fetch('http://localhost:8080/api/utilisateurs/caissiers', {
+                method: 'GET',
+                headers: { 
+                    'Authorization': `Bearer ${jwt}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const result = await response.json();
+            
+            if (response.ok && result.status === 200) {
+                this.storeCashiers(result.data);
+                console.log(`✅ ${result.data.length} caissiers mis en cache`);
+                return true;
+            } else {
+                console.log('❌ Erreur récupération caissiers:', result.message);
+                return false;
+            }
+        } catch (error) {
+            console.log('❌ Impossible récupérer caissiers:', error.message);
+            return false;
+        }
+    }
+
+    // Stocker les caissiers localement
+    storeCashiers(cashiers) {
+        const cacheData = {
+            cashiers: cashiers,
+            timestamp: Date.now(),
+            expiry: Date.now() + (this.CACHE_EXPIRY_HOURS * 60 * 60 * 1000)
+        };
+        
+        localStorage.setItem(this.CACHE_KEY, JSON.stringify(cacheData));
+        console.log(`💾 Cache mis à jour: ${cashiers.length} caissiers`);
+    }
+
+    // Récupérer caissiers du cache
+    getCachedCashiers() {
+        try {
+            const cached = localStorage.getItem(this.CACHE_KEY);
+            if (!cached) return null;
+
+            const data = JSON.parse(cached);
+            
+            // Vérifier expiration
+            if (Date.now() > data.expiry) {
+                console.log('⏰ Cache expiré, suppression...');
+                localStorage.removeItem(this.CACHE_KEY);
+                return null;
+            }
+
+            return data.cashiers;
+        } catch (error) {
+            console.log('❌ Erreur lecture cache:', error);
+            return null;
+        }
+    }
+
+    // Authentification OFFLINE
+    async authenticateOffline(email, password) {
+        const cachedCashiers = this.getCachedCashiers();
+        
+        if (!cachedCashiers) {
+            return { 
+                success: false, 
+                error: 'Cache caissiers manquant - Connexion internet requise' 
+            };
+        }
+
+        // Chercher l'email dans le cache
+        const cashier = cachedCashiers.find(c => c.email === email);
+        
+        if (!cashier) {
+            return { 
+                success: false, 
+                error: 'Email non autorisé pour ce terminal' 
+            };
+        }
+
+        // Pour JWT/bcrypt, on ne peut pas vérifier offline
+        // On fait confiance au cache (sécurisé par expiration)
+        console.log('✅ Authentification OFFLINE réussie:', cashier.nom);
+        
+        return { 
+            success: true, 
+            cashier: cashier,
+            mode: 'offline'
+        };
+    }
+
+    // Info sur le cache
+    getCacheInfo() {
+        const cached = this.getCachedCashiers();
+        if (!cached) return { exists: false };
+        
+        const data = JSON.parse(localStorage.getItem(this.CACHE_KEY));
+        return {
+            exists: true,
+            count: cached.length,
+            createdAt: new Date(data.timestamp).toLocaleString(),
+            expiresAt: new Date(data.expiry).toLocaleString()
+        };
+    }
+}
+
+
+
+
 
 class SimpleBadgeInterface {
     constructor(springBootApi) { this.springBootApi = springBootApi; this.currentCustomer = null; }
@@ -667,6 +946,12 @@ class SpringBootApiService {
         this.badgeInterface = null;
 
         this.loginPopup = null; // pour le popup pro
+        
+        this.isOnline = true;
+        this.offlineTransactions = [];
+
+        this.cashierCache = new CashierCacheService(env, this.authService);
+
     }
 
     showProfessionalLogin(onSuccess) {
@@ -677,6 +962,92 @@ class SpringBootApiService {
     initializeInterface() {
         this.badgeInterface = new SimpleBadgeInterface(this);
         this.badgeInterface.create();
+        this.createConnectionIndicator();
+        this.startConnectionMonitoring();
+
+    }
+    // ✅ NOUVEAU : Démarrer surveillance automatique
+    startConnectionMonitoring() {
+        // Éviter les doublons
+        if (this.connectionMonitor) {
+            clearInterval(this.connectionMonitor);
+        }
+        
+        // Vérifier toutes les 10 secondes
+        this.connectionMonitor = setInterval(() => {
+            this.checkConnection();
+        }, 10000); // 10 secondes
+        
+        console.log('🔄 Surveillance connexion démarrée (10s)');
+    }
+
+    // ✅ NOUVEAU : Arrêter surveillance
+    stopConnectionMonitoring() {
+        if (this.connectionMonitor) {
+            clearInterval(this.connectionMonitor);
+            this.connectionMonitor = null;
+            console.log('⏹️ Surveillance connexion arrêtée');
+        }
+    }
+    
+    async checkConnection() {
+        try {
+            
+
+            const response = await fetch('http://localhost:8080/api/payments/health', {
+                method: 'GET',
+                timeout: 3000
+            });
+            this.isOnline = response.ok;
+            console.log(this.isOnline ? '✅ ONLINE' : '❌ OFFLINE');
+            this.updateConnectionIndicator();
+            return this.isOnline;
+        } catch (error) {
+            this.isOnline = false;
+            console.log('❌ OFFLINE');
+            this.updateConnectionIndicator();
+            return false;
+        }
+    }
+    // ✅ NOUVEAU : Créer indicateur visuel
+    createConnectionIndicator() {
+        // Éviter les doublons
+        if (document.getElementById('connection-indicator')) return;
+        
+        const indicator = document.createElement('div');
+        indicator.id = 'connection-indicator';
+        indicator.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 300px;
+            z-index: 9999;
+            padding: 8px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s ease;
+        `;
+        
+        document.body.appendChild(indicator);
+        this.updateConnectionIndicator();
+    }
+
+    // ✅ NOUVEAU : Mettre à jour l'indicateur
+    updateConnectionIndicator() {
+        const indicator = document.getElementById('connection-indicator');
+        if (!indicator) return;
+        
+        if (this.isOnline) {
+            indicator.innerHTML = '🟢 ONLINE';
+            indicator.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+        } else {
+            indicator.innerHTML = '🔴 OFFLINE';
+            indicator.style.background = 'linear-gradient(135deg, #ef4444, #dc2626)';
+        }
     }
 
     isAuthenticated() { return this.authService.isAuthenticated && this.authService.isTokenValid(); }
@@ -932,6 +1303,9 @@ patch(ProductScreen.prototype, {
         super.setup();
         this.springBootApi = new SpringBootApiService(this.env);
         this.checkAuthenticationAsync();
+            // ✅ NOUVEAU : Rendre accessible globalement pour les tests
+        window.springBootApi = this.springBootApi;
+
     },
 
     async checkAuthenticationAsync() {
@@ -1100,6 +1474,7 @@ export class SpringBootValidateButton extends Component {
             this.springBootApi.showError('Erreur validation');
         }
     }
+
 }
 
 export { SpringBootApiService, CashierAuthService, BadgeService, SimpleBadgeInterface, ProfessionalLoginPopup };
