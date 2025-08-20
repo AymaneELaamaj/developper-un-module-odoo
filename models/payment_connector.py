@@ -84,6 +84,10 @@ class PaymentConnector(models.Model):
                 'utilisateurEmail': '',
                 'utilisateurCategorie': '',
                 'utilisateurNomComplet': '',
+                'transactionId': None,
+                'idTransaction': None,
+                'id': None,
+                
             }
 
             # ✅ EXTRACTION DIRECTE des champs de votre API
@@ -121,6 +125,13 @@ class PaymentConnector(models.Model):
                 
             if 'utilisateurNomComplet' in response_data:
                 extracted_data['utilisateurNomComplet'] = response_data['utilisateurNomComplet'] or ''
+            if 'transactionId' in response_data:
+                transaction_id = response_data['transactionId']
+                extracted_data['transactionId'] = transaction_id
+                extracted_data['idTransaction'] = transaction_id  # Backup
+                extracted_data['id'] = transaction_id  # Backup
+                _logger.info(f"🎯 TRANSACTION ID EXTRAIT: {transaction_id}")
+
 
             # ✅ COPIER LES ARTICLES
             articles_source = response_data.get('articles', [])

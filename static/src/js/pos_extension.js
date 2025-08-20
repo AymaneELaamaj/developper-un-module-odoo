@@ -11,6 +11,31 @@ import { registry } from "@web/core/registry";
 import { _t } from "@web/core/l10n/translation";
 import { AlertDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
 import { ConfirmationDialog } from "@web/core/confirmation_dialog/confirmation_dialog";
+
+/* ----------------------------------------------------------
+ * ✅ CONFIGURATION PRINT JOB + HELPERS
+ * ---------------------------------------------------------- */
+const BACKEND_BASE_URL = 'http://localhost:8080';
+const PRINT_TIMEOUT_MS = 8000;
+const DEFAULT_BROWSER_58_ID = 1;  // Terminal créé par défaut
+const DEFAULT_BROWSER_80_ID = 2;  // Terminal 80mm si créé
+
+function getDefaultTerminalId() {
+    const k = 'defaultTerminalId';
+    let id = localStorage.getItem(k);
+    if (!id) {
+        // PREMIER DEMARRAGE : demander largeur au caissier
+        const is80 = confirm('Votre imprimante est-elle en 80mm ?\nOK = 80mm, Annuler = 58mm');
+        id = String(is80 ? DEFAULT_BROWSER_80_ID : DEFAULT_BROWSER_58_ID);
+        localStorage.setItem(k, id);
+    }
+    return parseInt(id, 10);
+}
+
+function generateRequestId() {
+    return `pos-${(navigator.userAgent||'').slice(0,12)}-${Date.now()}`;
+}
+
 /* ----------------------------------------------------------
  * ✅ POPUP DE LOGIN PROFESSIONNELLE (intégré)
  * ---------------------------------------------------------- */
@@ -398,12 +423,6 @@ patch(CashierName.prototype, {
         }
     }
 });
-/* ----------------------------------------------------------
- * ✅ SUPPRIMER LE BOUTON CUSTOMER EN MODE SPRING BOOT
- * ---------------------------------------------------------- */
-
-
-
 
 /* ----------------------------------------------------------
  * ✅ Auth / Badge / API Services
@@ -640,6 +659,7 @@ async ensurePINSetup(email, jwt) {
             const result = await response.json();
 
             if (response.ok && result.status === 200) {
+                const userRole = result.data.role;
                 const allowedRoles = ['ADMIN', 'SUPER_ADMIN', 'CAISSIER'];
                 if (allowedRoles.includes(userRole)) {
                     this.jwtToken = token;
@@ -702,6 +722,7 @@ class BadgeService {
         } catch (error) { return { success: false, error: error.message }; }
     }
 }
+
 class CashierCacheService {
     constructor(env, authService) {
         this.env = env;
@@ -822,26 +843,9 @@ class CashierCacheService {
     }
 }
 
-
-
-
-
 class SimpleBadgeInterface {
     constructor(springBootApi) { this.springBootApi = springBootApi; this.currentCustomer = null; }
     create() { this.createBadgeArea();  }
-
-    // hideCustomerButton() {
-    //     setTimeout(() => {
-    //         const sels = ['.partner-button','.customer-button','.client-button','[data-bs-original-title*="Customer"]','.o_partner_button'];
-    //         for (const s of sels) {
-    //             const el = document.querySelector(s);
-    //             if (el && el.textContent.includes('med kacha')) { el.style.display = 'none'; break; }
-    //         }
-    //         document.querySelectorAll('button,.btn,div[role="button"]').forEach(btn=>{
-    //             if (btn.textContent && btn.textContent.toLowerCase().includes('med kacha')) btn.style.display='none';
-    //         });
-    //     }, 1000);
-    // }
 
     createBadgeArea() {
         setTimeout(() => {
@@ -951,21 +955,229 @@ class SpringBootApiService {
         this.offlineTransactions = [];
 
         this.cashierCache = new CashierCacheService(env, this.authService);
-
     }
+    // 🔧 AJOUTE CES DEUX MÉTHODES DANS SpringBootApiService
 
-    showProfessionalLogin(onSuccess) {
-        if (!this.loginPopup) this.loginPopup = new ProfessionalLoginPopup(this);
-        this.loginPopup.show(onSuccess);
+showProfessionalLogin(onSuccess) {
+    // Crée et affiche le popup pro que tu as déjà codé (ProfessionalLoginPopup)
+    if (!this.loginPopup) {
+        this.loginPopup = new ProfessionalLoginPopup(this);
     }
+    this.loginPopup.show(onSuccess);
+}
 
-    initializeInterface() {
+initializeInterface() {
+    // 1) Indicateur + monitoring réseau
+    this.createConnectionIndicator();
+    this.startConnectionMonitoring();
+
+    // 2) Interface badge simple (zone de scan)
+    if (!this.badgeInterface) {
         this.badgeInterface = new SimpleBadgeInterface(this);
-        this.badgeInterface.create();
-        this.createConnectionIndicator();
-        this.startConnectionMonitoring();
-
     }
+    this.badgeInterface.create();
+
+    // 3) (optionnel) Précharger le cache caissiers
+    this.cashierCache.fetchAndCacheCashiers().catch(() => {});
+}
+
+
+    // ✅ NOUVELLES MÉTHODES PRINT JOB
+    async createPrintJobWithDiagnostic(transactionId, terminalId, requestId) {
+    console.log('🎯 ===== CREATE PRINT JOB DIAGNOSTIC =====');
+    console.log('📥 Paramètres:');
+    console.log('  - transactionId:', transactionId, '(type:', typeof transactionId, ')');
+    console.log('  - terminalId:', terminalId, '(type:', typeof terminalId, ')');
+    console.log('  - requestId:', requestId, '(type:', typeof requestId, ')');
+    
+    const jwt = this.authService.getJWTToken();
+    console.log('🔑 JWT Token:');
+    console.log('  - Présent?', jwt !== null);
+    console.log('  - Longueur:', jwt ? jwt.length : 0);
+    console.log('  - Début:', jwt ? jwt.substring(0, 20) + '...' : 'NULL');
+    
+    const requestBody = { transactionId, terminalId, requestId };
+    console.log('📤 Request Body:', JSON.stringify(requestBody, null, 2));
+    
+    const url = `${BACKEND_BASE_URL}/api/print-jobs`;
+    console.log('🌐 URL:', url);
+    
+    const headers = { 
+        'Content-Type': 'application/json', 
+        'Authorization': `Bearer ${jwt}` 
+    };
+    console.log('📋 Headers:', headers);
+    
+    try {
+        console.log('📡 Envoi requête...');
+        const resp = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify(requestBody)
+        });
+        
+        console.log('📨 Réponse reçue:');
+        console.log('  - Status:', resp.status);
+        console.log('  - StatusText:', resp.statusText);
+        console.log('  - OK?', resp.ok);
+        console.log('  - Headers:', Object.fromEntries(resp.headers.entries()));
+        
+        let json;
+        try {
+            json = await resp.json();
+            console.log('📄 Response Body:', JSON.stringify(json, null, 2));
+        } catch (parseError) {
+            console.error('❌ Erreur parsing JSON:', parseError);
+            const text = await resp.text();
+            console.log('📄 Response Text:', text);
+            throw new Error('Réponse non-JSON: ' + text);
+        }
+        
+        if (!resp.ok) {
+            console.error('❌ Requête échouée');
+            console.error('  - Error dans response:', json.error);
+            console.error('  - Message:', json.message);
+            throw new Error(json.error || json.message || `HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        
+        console.log('✅ PrintJob créé avec succès:');
+        console.log('  - JobID:', json.jobId);
+        console.log('  - Response complète:', json);
+        return json;
+        
+    } catch (networkError) {
+        console.error('💥 Erreur réseau/fetch:');
+        console.error('  - Type:', networkError.constructor.name);
+        console.error('  - Message:', networkError.message);
+        console.error('  - Stack:', networkError.stack);
+        throw networkError;
+    }
+}
+
+
+    async finalizePrintJobWithDiagnostic(jobId, status, errorMessage = null, durationMs = null) {
+    console.log('🔄 ===== FINALISATION PRINT JOB DIAGNOSTIC =====');
+    console.log('📥 Paramètres:');
+    console.log('  - jobId:', jobId, '(type:', typeof jobId, ')');
+    console.log('  - status:', status);
+    console.log('  - errorMessage:', errorMessage);
+    console.log('  - durationMs:', durationMs);
+    
+    const jwt = this.authService.getJWTToken();
+    console.log('🔑 JWT Token présent?', jwt !== null);
+    
+    const body = { status };
+    if (errorMessage) body.errorMessage = errorMessage;
+    if (durationMs != null) body.durationMs = durationMs;
+    
+    console.log('📤 Request Body:', JSON.stringify(body, null, 2));
+    
+    const url = `${BACKEND_BASE_URL}/api/print-jobs/${jobId}`;
+    console.log('🌐 URL:', url);
+    
+    try {
+        console.log('📡 Envoi requête PATCH...');
+        const resp = await fetch(url, {
+            method: 'PATCH',
+            headers: { 'Content-Type':'application/json', 'Authorization': `Bearer ${jwt}` },
+            body: JSON.stringify(body)
+        });
+        
+        console.log('📨 Réponse PATCH:');
+        console.log('  - Status:', resp.status);
+        console.log('  - OK?', resp.ok);
+        
+        if (resp.ok) {
+            const json = await resp.json().catch(() => ({}));
+            console.log('✅ Finalisation réussie:', json);
+        } else {
+            const text = await resp.text();
+            console.error('❌ Erreur PATCH:', resp.status, text);
+        }
+        
+    } catch (error) {
+        console.error('💥 Erreur réseau PATCH:', error);
+    }
+}
+
+
+
+    openTicketWindowAndPrintWithDiagnostic(ticketHtml, mmWidth = 58) {
+    console.log('🖨️ ===== IMPRESSION SANS POPUP =====');
+    console.log('📄 HTML size:', ticketHtml.length);
+    console.log('📏 Width:', mmWidth, 'mm');
+    
+    return new Promise((resolve) => {
+        try {
+            // 1. Créer un iframe caché
+            const iframe = document.createElement('iframe');
+            iframe.style.cssText = `
+                position: absolute;
+                left: -9999px;
+                top: -9999px;
+                width: 1px;
+                height: 1px;
+                border: none;
+                opacity: 0;
+            `;
+            
+            document.body.appendChild(iframe);
+            console.log('✅ Iframe créé');
+            
+            // 2. Injecter le HTML dans l'iframe
+            const finalHtml = ticketHtml.replace('@@MM@@', String(mmWidth));
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+            
+            iframeDoc.open();
+            iframeDoc.write(finalHtml);
+            iframeDoc.close();
+            console.log('📄 HTML injecté dans iframe');
+            
+            // 3. Attendre que le contenu soit chargé
+            iframe.onload = () => {
+                console.log('📄 Iframe chargé, tentative d\'impression...');
+                
+                try {
+                    // 4. Déclencher l'impression
+                    iframe.contentWindow.print();
+                    console.log('✅ iframe.contentWindow.print() appelé');
+                    
+                    // 5. Nettoyer après un délai
+                    setTimeout(() => {
+                        try {
+                            document.body.removeChild(iframe);
+                            console.log('🧹 Iframe supprimé');
+                        } catch (e) {
+                            console.log('⚠️ Erreur suppression iframe:', e);
+                        }
+                        resolve({ ok: true, reason: 'iframe_print' });
+                    }, 1000);
+                    
+                } catch (printError) {
+                    console.error('❌ Erreur impression iframe:', printError);
+                    document.body.removeChild(iframe);
+                    resolve({ ok: false, reason: 'iframe_print_error' });
+                }
+            };
+            
+            // Fallback si onload ne se déclenche pas
+            setTimeout(() => {
+                console.log('⏰ Timeout iframe, nettoyage...');
+                try {
+                    document.body.removeChild(iframe);
+                } catch (e) {}
+                resolve({ ok: true, reason: 'iframe_timeout' });
+            }, 5000);
+            
+        } catch (error) {
+            console.error('❌ Erreur création iframe:', error);
+            resolve({ ok: false, reason: 'iframe_creation_error' });
+        }
+    });
+}
+
+
+
     // ✅ NOUVEAU : Démarrer surveillance automatique
     startConnectionMonitoring() {
         // Éviter les doublons
@@ -992,8 +1204,6 @@ class SpringBootApiService {
     
     async checkConnection() {
         try {
-            
-
             const response = await fetch('http://localhost:8080/api/payments/health', {
                 method: 'GET',
                 timeout: 3000
@@ -1099,62 +1309,218 @@ class SpringBootApiService {
         }
     }
 
-    showSuccessPopup(springResponse) {
-        const data = springResponse.spring_response || springResponse.data || springResponse;
-        const numeroTicket = this.generateTicketNumber();
-        const date = new Date().toLocaleDateString('fr-FR');
-        const heureTransaction = new Date().toLocaleTimeString('fr-FR');
-        const montantTotal = data.montantTotal || 0;
-        const partSalariale = data.partSalariale || 0;
-        const partPatronale = data.partPatronale || 0;
+    // ✅ MODIFICATION : showSuccessPopup avec orchestration PrintJob
+    async showSuccessPopup(springResponse) {
+    console.log('🚀 ===== DÉBUT DIAGNOSTIC PRINT JOB =====');
+    console.log('📄 SpringResponse COMPLET:', springResponse);
+    console.log('📄 Type de springResponse:', typeof springResponse);
+    console.log('📄 Est un objet?', springResponse && typeof springResponse === 'object');
+    
+    const data = springResponse.spring_response || springResponse.data || springResponse;
+    console.log('📊 Data extraite:', data);
+    console.log('📊 Type de data:', typeof data);
+    console.log('📊 Object.keys(data):', Object.keys(data || {}));
 
-        let utilisateurNomComplet = 'Client non identifié';
-        let utilisateurEmail = '';
-        if (this.badgeInterface && this.badgeInterface.currentCustomer) {
-            const customer = this.badgeInterface.currentCustomer;
-            utilisateurNomComplet = `${customer.nom} ${customer.prenom}`;
-            utilisateurEmail = customer.email || '';
-            if (customer.role && customer.role !== 'EMPLOYE') utilisateurNomComplet += ` - ${customer.role}`;
-        } else {
-            utilisateurNomComplet = data.utilisateurNomComplet || 'Client non identifié';
-            utilisateurEmail = data.utilisateurEmail || '';
+    // 1) Construire les infos ticket (logique existante préservée)
+    const numeroTicket = this.generateTicketNumber();
+    const date = new Date().toLocaleDateString('fr-FR');
+    const heure = new Date().toLocaleTimeString('fr-FR');
+    const mmWidth = (localStorage.getItem('defaultTerminalId') == String(DEFAULT_BROWSER_80_ID)) ? 80 : 58;
+    
+    console.log('🎫 Infos ticket:');
+    console.log('  - numeroTicket:', numeroTicket);
+    console.log('  - date:', date);
+    console.log('  - heure:', heure);
+    console.log('  - mmWidth:', mmWidth);
+
+    // 2) ✅ DIAGNOSTIC TRANSACTION ID DÉTAILLÉ
+    console.log('🔍 ===== DIAGNOSTIC TRANSACTION ID =====');
+    console.log('🔍 Recherche transactionId dans data:');
+    console.log('  - data.transactionId:', data?.transactionId, '(type:', typeof data?.transactionId, ')');
+    console.log('  - data.idTransaction:', data?.idTransaction, '(type:', typeof data?.idTransaction, ')');
+    console.log('  - data.id:', data?.id, '(type:', typeof data?.id, ')');
+    console.log('  - data.transaction_id:', data?.transaction_id, '(type:', typeof data?.transaction_id, ')');
+    console.log('  - data.transactionID:', data?.transactionID, '(type:', typeof data?.transactionID, ')');
+    
+    // Recherche plus approfondie
+    console.log('🔍 Recherche dans tous les champs possibles:');
+    if (data && typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) {
+            if (key.toLowerCase().includes('transaction') && typeof value !== 'object') {
+                console.log(`  - ${key}: ${value} (type: ${typeof value})`);
+            }
         }
+    }
+    
+    const transactionId = data?.transactionId || data?.idTransaction || data?.id || data?.transaction_id || data?.transactionID || null;
+    console.log('🎯 FINAL transactionId:', transactionId);
+    console.log('🎯 transactionId type:', typeof transactionId);
+    console.log('🎯 transactionId valid?', transactionId !== null && transactionId !== undefined);
 
-        const articles = data.articles || [];
-        let message = `🎉 TRANSACTION RÉUSSIE
+    // 3) ✅ DIAGNOSTIC TERMINAL ID
+    console.log('🔍 ===== DIAGNOSTIC TERMINAL ID =====');
+    console.log('📱 localStorage defaultTerminalId:', localStorage.getItem('defaultTerminalId'));
+    console.log('📱 DEFAULT_BROWSER_80_ID:', typeof DEFAULT_BROWSER_80_ID !== 'undefined' ? DEFAULT_BROWSER_80_ID : 'UNDEFINED');
+    
+    const terminalId = getDefaultTerminalId();
+    console.log('🎯 getDefaultTerminalId() result:', terminalId);
+    console.log('🎯 terminalId type:', typeof terminalId);
+    console.log('🎯 terminalId valid?', terminalId !== null && terminalId !== undefined && !isNaN(terminalId));
+
+    // 4) ✅ DIAGNOSTIC REQUEST ID
+    const requestId = generateRequestId();
+    console.log('🔍 ===== DIAGNOSTIC REQUEST ID =====');
+    console.log('🎯 generateRequestId() result:', requestId);
+    console.log('🎯 requestId type:', typeof requestId);
+    console.log('🎯 requestId valid?', requestId !== null && requestId !== undefined && requestId.length > 0);
+
+    // 5) ✅ DIAGNOSTIC JWT TOKEN
+    console.log('🔍 ===== DIAGNOSTIC JWT TOKEN =====');
+    const jwt = this.authService.getJWTToken();
+    console.log('🔑 JWT token présent?', jwt !== null && jwt !== undefined);
+    console.log('🔑 JWT length:', jwt ? jwt.length : 0);
+    console.log('🔑 JWT start:', jwt ? jwt.substring(0, 30) + '...' : 'NULL');
+    console.log('🔑 Auth service valid?', this.authService.isTokenValid());
+
+    // 6) ✅ PRÉ-CONDITIONS CREATEJOB
+    console.log('🔍 ===== PRÉ-CONDITIONS CREATEJOB =====');
+    const canCreateJob = (
+        transactionId !== null && transactionId !== undefined &&
+        terminalId !== null && terminalId !== undefined && !isNaN(terminalId) &&
+        requestId !== null && requestId !== undefined &&
+        jwt !== null && jwt !== undefined
+    );
+    console.log('✅ Peut créer PrintJob?', canCreateJob);
+    
+    if (!canCreateJob) {
+        console.error('❌ CONDITIONS NON REMPLIES POUR CREATEJOB:');
+        if (!transactionId) console.error('  - Transaction ID manquant');
+        if (!terminalId || isNaN(terminalId)) console.error('  - Terminal ID invalide');
+        if (!requestId) console.error('  - Request ID manquant');
+        if (!jwt) console.error('  - JWT Token manquant');
+    }
+
+    let jobId = null;
+    
+    if (canCreateJob) {
+        try {
+            console.log('🎯 ===== TENTATIVE CREATE PRINT JOB =====');
+            console.log('📤 Paramètres envoyés:');
+            console.log('  - transactionId:', transactionId);
+            console.log('  - terminalId:', terminalId);
+            console.log('  - requestId:', requestId);
+            
+            const job = await this.createPrintJobWithDiagnostic(transactionId, terminalId, requestId);
+            jobId = job?.jobId;
+            console.log('✅ PrintJob créé avec succès, jobId:', jobId);
+            
+        } catch (e) {
+            console.error('❌ ERREUR CREATE PRINT JOB:');
+            console.error('  - Type:', e.constructor.name);
+            console.error('  - Message:', e.message);
+            console.error('  - Stack:', e.stack);
+            
+            // On imprime quand même, mais on notifie que le journal serveur n'a pas été créé
+            this.notification.add('⚠️ Impression sans journal serveur: ' + e.message, { type: 'warning' });
+        }
+    } else {
+        console.warn('⚠️ CREATE PRINT JOB IGNORÉ - Conditions non remplies');
+        this.notification.add('⚠️ PrintJob ignoré - Données manquantes', { type: 'warning' });
+    }
+
+    // 7) ✅ DIAGNOSTIC IMPRESSION
+    console.log('🔍 ===== DIAGNOSTIC IMPRESSION =====');
+    const html = this.generateTicketContent(data, numeroTicket, date, heure, mmWidth);
+    console.log('📄 HTML généré, taille:', html.length, 'caractères');
+    console.log('📄 HTML contient @@MM@@?', html.includes('@@MM@@'));
+    
+    const t0 = performance.now();
+    console.log('🖨️ Début impression, timestamp:', t0);
+    
+    const result = await this.openTicketWindowAndPrintWithDiagnostic(html, mmWidth);
+    const duration = Math.round(performance.now() - t0);
+    
+    console.log('🖨️ ===== RÉSULTAT IMPRESSION =====');
+    console.log('✅ Résultat:', result);
+    console.log('⏱️ Durée:', duration, 'ms');
+
+    // 8) ✅ DIAGNOSTIC FINALISATION
+    if (jobId) {
+        console.log('🔍 ===== FINALISATION PRINT JOB =====');
+        console.log('🔄 JobId à finaliser:', jobId);
+        console.log('📊 Status impression:', result.ok ? 'SUCCESS' : 'FAILED');
+        console.log('📝 Reason:', result.reason);
+        
+        try {
+            if (result.ok) {
+                console.log('📡 Envoi PATCH SUCCESS...');
+                await this.finalizePrintJobWithDiagnostic(jobId, 'SUCCESS', result.reason || null, duration);
+            } else {
+                console.log('📡 Envoi PATCH FAILED...');
+                await this.finalizePrintJobWithDiagnostic(jobId, 'FAILED', result.reason || null, duration);
+                }
+            console.log('✅ Finalisation terminée avec succès');
+        } catch (e) {
+            console.error('❌ ERREUR FINALISATION:');
+            console.error('  - Message:', e.message);
+            console.error('  - Stack:', e.stack);
+        }
+    } else {
+        console.warn('⚠️ FINALISATION IGNORÉE - Pas de jobId');
+    }
+
+    // 9) Reste de votre logique existante (conservée)
+    const montantTotal = data?.montantTotal || 0;
+    const partSalariale = data?.partSalariale || 0;
+    const partPatronale = data?.partPatronale || 0;
+
+    let utilisateurNomComplet = 'Client non identifié';
+    let utilisateurEmail = '';
+    if (this.badgeInterface && this.badgeInterface.currentCustomer) {
+        const customer = this.badgeInterface.currentCustomer;
+        utilisateurNomComplet = `${customer.nom} ${customer.prenom}`;
+        utilisateurEmail = customer.email || '';
+        if (customer.role && customer.role !== 'EMPLOYE') utilisateurNomComplet += ` - ${customer.role}`;
+    } else {
+        utilisateurNomComplet = data?.utilisateurNomComplet || 'Client non identifié';
+        utilisateurEmail = data?.utilisateurEmail || '';
+    }
+
+    const articles = data?.articles || [];
+    let message = `🎉 TRANSACTION RÉUSSIE
 
 👤 Client: ${utilisateurNomComplet}`;
-        if (utilisateurEmail && utilisateurEmail.trim() !== '') {
-            message += `\n📧 Email: ${utilisateurEmail}`;
-        }
-        message += `
+    if (utilisateurEmail && utilisateurEmail.trim() !== '') {
+        message += `\n📧 Email: ${utilisateurEmail}`;
+    }
+    message += `
 
 📋 Détails:
 • N° Ticket: ${numeroTicket}
 • Date: ${date}
-• Heure: ${heureTransaction}
+• Heure: ${heure}
 
 🛒 Articles achetés:`;
 
-        if (articles && articles.length > 0) {
-            articles.forEach((article, index) => {
-                const nom = article.nom || article.nomArticle || `Article ${index + 1}`;
-                const quantite = article.quantite || article.quantiteTotale || 1;
-                const prixUnitaire = article.prixUnitaire || 0;
-                const montantArticle = article.montantTotal || (prixUnitaire * quantite);
-                const subvention = article.subventionTotale || 0;
-                const partClient = article.partSalariale || (montantArticle - subvention);
+    if (articles && articles.length > 0) {
+        articles.forEach((article, index) => {
+            const nom = article.nom || article.nomArticle || `Article ${index + 1}`;
+            const quantite = article.quantite || article.quantiteTotale || 1;
+            const prixUnitaire = article.prixUnitaire || 0;
+            const montantArticle = article.montantTotal || (prixUnitaire * quantite);
+            const subvention = article.subventionTotale || 0;
+            const partClient = article.partSalariale || (montantArticle - subvention);
 
-                message += `
+            message += `
 • ${nom} x${quantite}
   Prix: ${prixUnitaire.toFixed(2)}€ | Total: ${montantArticle.toFixed(2)}€
   Subvention: ${subvention.toFixed(2)}€ | Votre part: ${partClient.toFixed(2)}€`;
-            });
-        } else {
-            message += `\n• Aucun détail d'article disponible`;
-        }
+        });
+    } else {
+        message += `\n• Aucun détail d'article disponible`;
+    }
 
-        message += `
+    message += `
 
 💰 RÉSUMÉ FINANCIER:
 • Prix total: ${montantTotal.toFixed(2)}€
@@ -1162,35 +1528,35 @@ class SpringBootApiService {
 • Votre part: ${partSalariale.toFixed(2)}€
 
 ✅ Montant déduit de votre badge avec succès`;
-        if (partPatronale > 0) message += `\n🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !`;
+    if (partPatronale > 0) message += `\n🎯 Vous avez économisé ${partPatronale.toFixed(2)}€ grâce à la subvention !`;
 
-        // ✅ NOUVEAU : Impression automatique AVANT le popup
-        this.printTicket(data, numeroTicket, date, heureTransaction);
+    // 10) Pop up de succès avec mention impression + diagnostic
+    const impressionStatus = result.ok ? 'envoyé à l\'imprimante' : 'échec impression';
+    this.dialog.add(AlertDialog, {
+        title: _t('✅ Paiement Validé avec Succès (Diagnostic)'),
+        body: message + `\n\n🖨️ Ticket ${impressionStatus}\n\n🔍 Diagnostic:\n• JobID: ${jobId || 'NULL'}\n• TransactionID: ${transactionId || 'NULL'}\n• TerminalID: ${terminalId || 'NULL'}`,
+        confirmLabel: _t('OK')
+    });
 
-        // ✅ POPUP SIMPLIFIÉ sans bouton imprimer
-        this.dialog.add(AlertDialog, {
-            title: _t('✅ Paiement Validé avec Succès'),
-            body: message + '\n\n🖨️ Ticket imprimé automatiquement',
-            confirmLabel: _t('OK')
-        });
+    this.notification.add(
+        _t('Paiement validé pour ') + utilisateurNomComplet.split(' - ')[0] +
+        _t(' - ') + articles.length + _t(' article(s) - Subvention: ') + partPatronale.toFixed(2) + '€',
+        { type: 'success', sticky: false }
+    );
 
-        this.notification.add(
-            _t('Paiement validé pour ') + utilisateurNomComplet.split(' - ')[0] +
-            _t(' - ') + articles.length + _t(' article(s) - Subvention: ') + partPatronale.toFixed(2) + '€',
-            { type: 'success', sticky: false }
-        );
-    }
+    // Notification impression avec diagnostic
+    this.notification.add('Ticket ' + impressionStatus + ` (JobID: ${jobId || 'NULL'})`, { type: result.ok ? 'success' : 'warning' });
+    
+    console.log('🏁 ===== FIN DIAGNOSTIC PRINT JOB =====');
+    console.log('📊 RÉSUMÉ:');
+    console.log('  - TransactionID trouvé:', transactionId);
+    console.log('  - JobID créé:', jobId);
+    console.log('  - Impression réussie:', result.ok);
+    console.log('  - Finalisation OK:', jobId ? 'OUI' : 'NON');
+}
 
-    printTicket(springData, numeroTicket, date, heureTransaction) {
-        const ticketContent = this.generateTicketContent(springData, numeroTicket, date, heureTransaction);
-        const printWindow = window.open('', 'TicketPrint', 'width=400,height=600');
-        printWindow.document.write(ticketContent);
-        printWindow.document.close();
-        printWindow.focus();
-        printWindow.print();
-    }
-
-    generateTicketContent(data, numeroTicket, date, heureTransaction) {
+    // ✅ MODIFICATION : generateTicketContent avec support 58/80mm
+    generateTicketContent(data, numeroTicket, date, heureTransaction, mmWidth = 58) {
         const articles = data.articles || [];
         const montantTotal = data.montantTotal || 0;
         const partSalariale = data.partSalariale || 0;
@@ -1231,7 +1597,9 @@ class SpringBootApiService {
         return `
         <!DOCTYPE html><html><head><meta charset="utf-8"><title>Ticket Cantine</title>
         <style>
-            body { font-family: 'Courier New', monospace; font-size:12px; margin:0; padding:10px; width:300px; }
+            @page { size: @@MM@@mm auto; margin: 0; }
+            @media print { body { margin: 0; } }
+            body { font-family: 'Courier New', monospace; font-size:12px; margin:0; padding:10px; width: 100%; box-sizing: border-box; }
             .center { text-align:center; } .right { text-align:right; } .bold { font-weight:bold; }
             .separator { border-top:1px dashed #333; margin:8px 0; }
             table { width:100%; border-collapse:collapse; } td { padding:2px 0; vertical-align:top; }
@@ -1303,9 +1671,8 @@ patch(ProductScreen.prototype, {
         super.setup();
         this.springBootApi = new SpringBootApiService(this.env);
         this.checkAuthenticationAsync();
-            // ✅ NOUVEAU : Rendre accessible globalement pour les tests
+        // ✅ NOUVEAU : Rendre accessible globalement pour les tests
         window.springBootApi = this.springBootApi;
-
     },
 
     async checkAuthenticationAsync() {
@@ -1327,75 +1694,75 @@ patch(ProductScreen.prototype, {
         this.springBootApi.initializeInterface();
         this.createSpringBootButton();
         this.hidePaymentButton();
-        this.hideCustomerButtonDefinitively(); // ← AJOUTEZ CETTE LIGNE
-
+        this.hideCustomerButtonDefinitively();
 
         const cashier = this.springBootApi.authService.getCurrentCashier();
         if (cashier) {
             this.springBootApi.notification.add(`Session POS: ${cashier.nom} ${cashier.prenom}`, { type: 'success' });
         }
     },
-   hideCustomerButtonDefinitively() {
-    // 🎯 SOLUTION ULTRA-PRÉCISE ET SÛRE
-    
-    // 1. CSS ciblé uniquement sur le bouton exact
-    const style = document.createElement('style');
-    style.id = 'spring-boot-hide-customer';
-    style.textContent = `
-        /* Cibler uniquement le bouton Customer exact d'Odoo 18 */
-        button.set-partner.btn.btn-light.btn-lg.lh-lg.text-truncate.w-auto {
-            display: none !important;
-        }
+
+    hideCustomerButtonDefinitively() {
+        // 🎯 SOLUTION ULTRA-PRÉCISE ET SÛRE
         
-        /* Backup pour d'autres structures possibles */
-        .set-partner:has-text("Customer") {
-            display: none !important;
-        }
-    `;
-    document.head.appendChild(style);
-    
-    // 2. JavaScript très précis
-    const hideExactCustomerButton = () => {
-        // Chercher UNIQUEMENT les boutons avec le texte exact "Customer"
-        const customerButtons = document.querySelectorAll('button');
-        customerButtons.forEach(btn => {
-            // Vérifications multiples pour être 100% sûr
-            if (btn.classList.contains('set-partner') && 
-                btn.textContent.trim() === 'Customer') {
-                btn.style.display = 'none';
-                console.log('✅ Bouton Customer masqué par Spring Boot');
+        // 1. CSS ciblé uniquement sur le bouton exact
+        const style = document.createElement('style');
+        style.id = 'spring-boot-hide-customer';
+        style.textContent = `
+            /* Cibler uniquement le bouton Customer exact d'Odoo 18 */
+            button.set-partner.btn.btn-light.btn-lg.lh-lg.text-truncate.w-auto {
+                display: none !important;
             }
-        });
-    };
-    
-    // 3. Exécuter immédiatement et avec délai
-    hideExactCustomerButton();
-    setTimeout(hideExactCustomerButton, 1000);
-    setTimeout(hideExactCustomerButton, 3000);
-    
-    // 4. Observer TRÈS sélectif
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach(mutation => {
-            mutation.addedNodes.forEach(node => {
-                if (node.nodeType === 1) { // Element node
-                    // Chercher seulement dans les nouveaux éléments
-                    const newCustomerBtn = node.querySelector?.('button.set-partner');
-                    if (newCustomerBtn && newCustomerBtn.textContent.trim() === 'Customer') {
-                        newCustomerBtn.style.display = 'none';
-                        console.log('✅ Nouveau bouton Customer masqué');
-                    }
+            
+            /* Backup pour d'autres structures possibles */
+            .set-partner:has-text("Customer") {
+                display: none !important;
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // 2. JavaScript très précis
+        const hideExactCustomerButton = () => {
+            // Chercher UNIQUEMENT les boutons avec le texte exact "Customer"
+            const customerButtons = document.querySelectorAll('button');
+            customerButtons.forEach(btn => {
+                // Vérifications multiples pour être 100% sûr
+                if (btn.classList.contains('set-partner') && 
+                    btn.textContent.trim() === 'Customer') {
+                    btn.style.display = 'none';
+                    console.log('✅ Bouton Customer masqué par Spring Boot');
                 }
             });
+        };
+        
+        // 3. Exécuter immédiatement et avec délai
+        hideExactCustomerButton();
+        setTimeout(hideExactCustomerButton, 1000);
+        setTimeout(hideExactCustomerButton, 3000);
+        
+        // 4. Observer TRÈS sélectif
+        const observer = new MutationObserver((mutations) => {
+            mutations.forEach(mutation => {
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) { // Element node
+                        // Chercher seulement dans les nouveaux éléments
+                        const newCustomerBtn = node.querySelector?.('button.set-partner');
+                        if (newCustomerBtn && newCustomerBtn.textContent.trim() === 'Customer') {
+                            newCustomerBtn.style.display = 'none';
+                            console.log('✅ Nouveau bouton Customer masqué');
+                        }
+                    }
+                });
+            });
         });
-    });
-    
-    observer.observe(document.body, { 
-        childList: true, 
-        subtree: true 
-    });
-    
-    console.log('🎯 Système de masquage Customer activé - Ultra-précis');
- } , 
+        
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true 
+        });
+        
+        console.log('🎯 Système de masquage Customer activé - Ultra-précis');
+    },
 
     hidePaymentButton() {
         const style = document.createElement('style');
@@ -1474,7 +1841,6 @@ export class SpringBootValidateButton extends Component {
             this.springBootApi.showError('Erreur validation');
         }
     }
-
 }
 
 export { SpringBootApiService, CashierAuthService, BadgeService, SimpleBadgeInterface, ProfessionalLoginPopup };
